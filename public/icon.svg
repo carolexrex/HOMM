@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Bannerfront icon">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2f5f5f" />
+      <stop offset="100%" stop-color="#13252b" />
+    </linearGradient>
+    <linearGradient id="banner" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f4cd7a" />
+      <stop offset="100%" stop-color="#c88c35" />
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)" />
+  <path d="M34 22h12v84H34z" fill="#e0ddc7" />
+  <path d="M46 28h42l-10 14 10 14H46z" fill="url(#banner)" />
+  <path d="M56 66l11 8-4 13 11-8 11 8-4-13 11-8H79l-5-12-5 12z" fill="#f7f2dd" />
+</svg>
