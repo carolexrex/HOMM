@@ -11,6 +11,8 @@ export type TerrainKind =
   | "road"
   | "swamp"
   | "river"
+  | "water"
+  | "shore"
   | "bridge"
   | "village"
   | "keep";

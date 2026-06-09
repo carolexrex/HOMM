@@ -1,35 +1,59 @@
 # Bannerfront
 
-Bannerfront is a mobile-first fantasy tactics PWA built around 2-player hot-seat duels and a Supabase-ready async online layer.
+Bannerfront is a mobile-first fantasy tactics PWA built with React, TypeScript, Vite, and PixiJS. It supports local hot-seat play, solo AI, and a Supabase-backed async online mode.
 
-## Implemented in this workspace
+## Current Features
 
-- React + TypeScript + Vite app shell
-- PixiJS tactical board renderer with touch-friendly tile interaction
-- Deterministic local rules engine for movement, combat, healing, recruitment, captures, and turn flow
-- Five handcrafted mirrored maps
-- Offline hot-seat persistence in localStorage
-- Supabase schema and edge function stubs for guest sessions, match creation, and turn submission
-- Rules-engine tests
+- Deterministic tactics engine for movement, combat, healing, recruitment, captures, economy, veterancy, and turn flow.
+- Playable modes: hot-seat, solo vs AI, and async online.
+- Six mirrored maps: Meadow Line, Ashen Ford, Thornwatch, Sunken Road, Citadel Pass, and Lakewatch.
+- Terrain-driven play with roads, forests, hills, swamps, rivers, bridges, water, shorelines, villages, and keeps.
+- Supabase schema with Row Level Security policies and Edge Functions for guest profile, match create/join/list/resume, and server-side turn commits.
+- Local persistence for settings, account name, active match, online session, and local match stats.
+- Vitest coverage for engine, AI, map topology, and stability.
 
-## Run locally
+## Local Development
 
-1. Install dependencies: `npm install`
-2. Start the app: `npm run dev`
-3. Run tests: `npm test`
-4. Build for production: `npm run build`
+```powershell
+npm install
+npm run dev
+npm test
+npm run build
+```
 
-## Optional online configuration
+## Environment
 
-Set these env vars before running the client:
+Create a local `.env` file. Client-side values are safe to expose to the browser.
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
+```env
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
 
-Then deploy the SQL in [supabase/schema.sql](supabase/schema.sql) and replace the stub edge functions with real persistence and turn validation.
+SUPABASE_URL=
+SUPABASE_SERVICE_ROLE_KEY=
+```
 
-## Notes
+Use your Supabase project URL for both `VITE_SUPABASE_URL` and `SUPABASE_URL`. Use the publishable/anon key for `VITE_SUPABASE_ANON_KEY`. Keep `SUPABASE_SERVICE_ROLE_KEY` secret; it is only for Edge Functions.
 
-- Hot-seat is the fully playable mode in this scaffold.
-- Async online is intentionally scaffolded, not production-complete.
-- Monetization is cosmetic-first by design and not wired to checkout in v1.
+## Supabase Setup
+
+1. Run [supabase/schema.sql](supabase/schema.sql) in the Supabase SQL editor.
+2. Enable anonymous sign-ins in Supabase Auth.
+3. Deploy Edge Functions. Supabase provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to deployed functions; do not upload those names from `.env` with `supabase secrets set --env-file`.
+
+```powershell
+npx supabase functions deploy guest-session
+npx supabase functions deploy matches
+npx supabase functions deploy match-turn
+```
+
+## MVP Status
+
+Hot-seat and solo AI are stable locally. Async online is implemented and connected to Supabase, but it still needs full two-device end-to-end testing before public MVP release.
+
+Known pre-release work:
+
+- Verify create, join, resume, submit turns, stale turn rejection, and match finish across two browsers/devices.
+- Choose and document the frontend host.
+- Optimize large PNG/MP3 assets for mobile load time.
+- Finalize deployment notes and release checklist.

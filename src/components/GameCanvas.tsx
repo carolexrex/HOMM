@@ -3,12 +3,23 @@ import { Application, Container, Graphics, Sprite, Text, TextStyle, Texture } fr
 import { getUnitLevel, PLAYER_COLORS } from "../engine";
 import type { Coord, MatchState, TerrainKind, TileState, UnitKind, UnitState } from "../engine";
 import plainsUrl from "../assets/terrain_plains.png";
+import plains2Url from "../assets/terrain_plains_2.png";
+import plains3Url from "../assets/terrain_plains_3.png";
 import forestUrl from "../assets/terrain_forest.png";
 import hillUrl from "../assets/terrain_hill.png";
 import keepUrl from "../assets/terrain_keep.png";
 import bridgeUrl from "../assets/terrain_bridge.png";
 import swampUrl from "../assets/terrain_swamp.png";
 import villageUrl from "../assets/terrain_town.png";
+import roadHorizontalUrl from "../assets/terrain_road_horizontal.png";
+import roadVerticalUrl from "../assets/terrain_road_vertical.png";
+import roadCornerUrl from "../assets/terrain_corner.png";
+import roadCrossroadsUrl from "../assets/terrain_crossroads.png";
+import roadTJunctionUrl from "../assets/terrain_road_t_junction.png";
+import roadTJunctionRightUrl from "../assets/terrain_road_t_junction_right.png";
+import riverHorizontalUrl from "../assets/terrain_river_horizontal.png";
+import waterFullUrl from "../assets/terrain/water_full.png";
+import shoreOverlayUrl from "../assets/terrain/shore_overlay.png";
 import militiaUrl from "../assets/units/militia.png";
 import swordsmanUrl from "../assets/units/swordsman.png";
 import pikemanUrl from "../assets/units/pikeman.png";
@@ -83,12 +94,29 @@ const combatPreviewMetaStyle = new TextStyle({ fill: 0xffd7cf, fontFamily: "Treb
 
 const terrainTextures = {
   plains: Texture.from(plainsUrl),
+  plains2: Texture.from(plains2Url),
+  plains3: Texture.from(plains3Url),
   forest: Texture.from(forestUrl),
   hill: Texture.from(hillUrl),
   keep: Texture.from(keepUrl),
   bridge: Texture.from(bridgeUrl),
   swamp: Texture.from(swampUrl),
   village: Texture.from(villageUrl)
+};
+
+const roadTextures = {
+  horizontal: Texture.from(roadHorizontalUrl),
+  vertical: Texture.from(roadVerticalUrl),
+  corner: Texture.from(roadCornerUrl),
+  cross: Texture.from(roadCrossroadsUrl),
+  t: Texture.from(roadTJunctionUrl),
+  tRight: Texture.from(roadTJunctionRightUrl)
+};
+
+const riverTextures = {
+  horizontal: Texture.from(riverHorizontalUrl),
+  water: Texture.from(waterFullUrl),
+  shore: Texture.from(shoreOverlayUrl)
 };
 
 const unitTextures: Record<UnitKind, Texture> = {
@@ -438,22 +466,30 @@ function drawTerrain(root: Container, state: MatchState, tile: TileState, x: num
   root.addChild(shadow);
 
   if (tile.terrain === "road") {
-    drawBaseTerrainSprite(root, terrainTextures.plains, x, y, size);
-    drawProceduralRoad(root, state, tile, x, y, size);
+    drawRoadTile(root, state, tile, x, y, size);
     if (tile.structure) drawOwnershipMarker(root, tile, x, y, size);
     return;
   }
 
   if (tile.terrain === "river") {
-    drawBaseTerrainSprite(root, terrainTextures.plains, x, y, size);
-    drawProceduralRiver(root, state, tile, x, y, size);
+    drawRiverTile(root, state, tile, x, y, size);
     if (tile.structure) drawOwnershipMarker(root, tile, x, y, size);
+    return;
+  }
+
+  if (tile.terrain === "water") {
+    drawBaseTerrainSprite(root, riverTextures.water, x, y, size, 0, terrainTint(tile));
+    return;
+  }
+
+  if (tile.terrain === "shore") {
+    drawShoreTile(root, state, tile, x, y, size);
     return;
   }
 
   const config = resolveTerrainSprite(state, tile);
   if (config) {
-    drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation);
+    drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation, config.tint);
     if (tile.structure) drawOwnershipMarker(root, tile, x, y, size);
     return;
   }
@@ -467,7 +503,7 @@ function drawTerrain(root: Container, state: MatchState, tile: TileState, x: num
   if (tile.structure) drawOwnershipMarker(root, tile, x, y, size);
 }
 
-function drawBaseTerrainSprite(root: Container, texture: Texture, x: number, y: number, size: number, rotation = 0) {
+function drawBaseTerrainSprite(root: Container, texture: Texture, x: number, y: number, size: number, rotation = 0, tint = 0xffffff) {
   const sprite = new Sprite(texture);
   if (rotation !== 0) {
     sprite.anchor.set(0.5);
@@ -480,8 +516,13 @@ function drawBaseTerrainSprite(root: Container, texture: Texture, x: number, y: 
   sprite.width = size;
   sprite.height = size;
   sprite.rotation = rotation;
+  sprite.tint = tint;
   sprite.roundPixels = true;
   root.addChild(sprite);
+}
+
+function drawPlainsTile(root: Container, tile: TileState, x: number, y: number, size: number) {
+  drawBaseTerrainSprite(root, selectPlainsTexture(tile), x, y, size, terrainRotation(tile), terrainTint(tile));
 }
 
 function drawOwnershipMarker(root: Container, tile: TileState, x: number, y: number, size: number) {
@@ -514,121 +555,68 @@ function drawOwnershipMarker(root: Container, tile: TileState, x: number, y: num
   root.addChild(marker);
 }
 
-function drawProceduralRoad(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
+function drawRoadTile(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
   const dirs = neighborDirections(state, tile, ["road", "bridge", "village", "keep"]);
   const activeDirs: Array<"n" | "s" | "e" | "w"> = dirs.length > 0 ? dirs : ["e", "w"];
-  drawAlignedPath(root, x, y, size, activeDirs, size * 0.28, size * 0.18, 0x8e6d4d, 0xd5ae7c);
+  const config = resolveRoadSprite(activeDirs);
+  drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation);
 }
 
-function drawProceduralRiver(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
-  const dirs = neighborDirections(state, tile, ["river", "bridge"]);
+function drawRiverTile(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
+  const dirs = neighborDirections(state, tile, ["river"]);
   const activeDirs: Array<"n" | "s" | "e" | "w"> = dirs.length > 0 ? dirs : ["e", "w"];
-  drawSegmentedPath(root, x, y, size, activeDirs, size * 0.5, size * 0.38, 0x7b8b5a, 0x5686ab);
-
-  const sheen = new Graphics();
-  sheen.lineStyle(size * 0.08, 0xaad1e6, 0.28);
-  for (const dir of activeDirs) {
-    const edge = edgePoint(dir, x, y, size);
-    sheen.moveTo(x + size * 0.5, y + size * 0.5);
-    sheen.lineTo((x + size * 0.5 + edge.x) / 2, (y + size * 0.5 + edge.y) / 2);
-  }
-  if (activeDirs.length > 2 || !isOppositeConnection(activeDirs)) {
-    sheen.beginFill(0xaad1e6, 0.12);
-    sheen.drawCircle(x + size * 0.5, y + size * 0.5, size * 0.045);
-    sheen.endFill();
-  }
-  root.addChild(sheen);
+  const config = resolveRiverSprite(activeDirs);
+  drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation);
 }
 
-function drawSegmentedPath(root: Container, x: number, y: number, size: number, dirs: Array<"n" | "s" | "e" | "w">, outerWidth: number, innerWidth: number, outerColor: number, innerColor: number) {
-  const centerX = x + size * 0.5;
-  const centerY = y + size * 0.5;
-  const complexJunction = dirs.length > 2 || !isOppositeConnection(dirs);
-
-  const outer = new Graphics();
-  outer.lineStyle(outerWidth, outerColor, 1);
-  for (const dir of dirs) {
-    const edge = edgePoint(dir, x, y, size);
-    outer.moveTo(centerX, centerY);
-    outer.lineTo(edge.x, edge.y);
-  }
-  if (complexJunction) {
-    outer.beginFill(outerColor, 1);
-    outer.drawCircle(centerX, centerY, outerWidth * 0.24);
-    outer.endFill();
-  }
-  root.addChild(outer);
-
-  const inner = new Graphics();
-  inner.lineStyle(innerWidth, innerColor, 1);
-  for (const dir of dirs) {
-    const edge = edgePoint(dir, x, y, size);
-    inner.moveTo(centerX, centerY);
-    inner.lineTo(edge.x, edge.y);
-  }
-  if (complexJunction) {
-    inner.beginFill(innerColor, 1);
-    inner.drawCircle(centerX, centerY, innerWidth * 0.22);
-    inner.endFill();
-  }
-  root.addChild(inner);
+function drawShoreTile(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
+  drawPlainsTile(root, tile, x, y, size);
+  drawBaseTerrainSprite(root, riverTextures.shore, x, y, size, shoreRotation(state, tile));
 }
 
-function drawAlignedPath(root: Container, x: number, y: number, size: number, dirs: Array<"n" | "s" | "e" | "w">, outerWidth: number, innerWidth: number, outerColor: number, innerColor: number) {
-  const outer = new Graphics();
-  outer.beginFill(outerColor, 1);
-  drawAlignedPathLayer(outer, x, y, size, dirs, outerWidth);
-  outer.endFill();
-  root.addChild(outer);
+function resolveRoadSprite(dirs: Array<"n" | "s" | "e" | "w">): { texture: Texture; rotation?: number } {
+  const hasN = dirs.includes("n");
+  const hasS = dirs.includes("s");
+  const hasE = dirs.includes("e");
+  const hasW = dirs.includes("w");
 
-  const inner = new Graphics();
-  inner.beginFill(innerColor, 1);
-  drawAlignedPathLayer(inner, x, y, size, dirs, innerWidth);
-  inner.endFill();
-  root.addChild(inner);
-}
-
-function drawAlignedPathLayer(graphics: Graphics, x: number, y: number, size: number, dirs: Array<"n" | "s" | "e" | "w">, width: number) {
-  const centerX = x + size * 0.5;
-  const centerY = y + size * 0.5;
-  const half = width * 0.5;
-
-  graphics.drawRect(centerX - half, centerY - half, width, width);
-
-  for (const dir of dirs) {
-    switch (dir) {
-      case "n":
-        graphics.drawRect(centerX - half, y, width, size * 0.5 + half);
-        break;
-      case "s":
-        graphics.drawRect(centerX - half, centerY - half, width, size * 0.5 + half);
-        break;
-      case "e":
-        graphics.drawRect(centerX - half, centerY - half, size * 0.5 + half, width);
-        break;
-      case "w":
-        graphics.drawRect(x, centerY - half, size * 0.5 + half, width);
-        break;
-    }
+  if (dirs.length >= 4) {
+    return { texture: roadTextures.cross };
   }
-}
 
-function isOppositeConnection(dirs: Array<"n" | "s" | "e" | "w">) {
-  return dirs.length === 2 && ((dirs.includes("n") && dirs.includes("s")) || (dirs.includes("e") && dirs.includes("w")));
-}
-
-function edgePoint(dir: "n" | "s" | "e" | "w", x: number, y: number, size: number) {
-  switch (dir) {
-    case "n":
-      return { x: x + size * 0.5, y };
-    case "s":
-      return { x: x + size * 0.5, y: y + size };
-    case "e":
-      return { x: x + size, y: y + size * 0.5 };
-    case "w":
-      return { x, y: y + size * 0.5 };
+  if (dirs.length === 3) {
+    if (!hasN) return { texture: roadTextures.t, rotation: 0 };
+    if (!hasE) return { texture: roadTextures.t, rotation: Math.PI / 2 };
+    if (!hasS) return { texture: roadTextures.t, rotation: Math.PI };
+    return { texture: roadTextures.tRight };
   }
+
+  if (dirs.length === 2) {
+    if (hasN && hasS) return { texture: roadTextures.vertical };
+    if (hasE && hasW) return { texture: roadTextures.horizontal };
+    if (hasE && hasS) return { texture: roadTextures.corner, rotation: 0 };
+    if (hasS && hasW) return { texture: roadTextures.corner, rotation: Math.PI / 2 };
+    if (hasN && hasW) return { texture: roadTextures.corner, rotation: Math.PI };
+    return { texture: roadTextures.corner, rotation: -Math.PI / 2 };
+  }
+
+  if (hasN || hasS) {
+    return { texture: roadTextures.vertical };
+  }
+  return { texture: roadTextures.horizontal };
 }
+
+function resolveRiverSprite(dirs: Array<"n" | "s" | "e" | "w">): { texture: Texture; rotation?: number } {
+  const hasN = dirs.includes("n");
+  const hasS = dirs.includes("s");
+  const hasE = dirs.includes("e");
+  const hasW = dirs.includes("w");
+
+  if (hasN || hasS) return { texture: riverTextures.horizontal, rotation: Math.PI / 2 };
+  if (hasE || hasW) return { texture: riverTextures.horizontal };
+  return { texture: riverTextures.horizontal };
+}
+
 function drawUnit(root: Container, unit: UnitState, x: number, y: number, size: number, zoom: number, selected: boolean) {
   const container = new Container();
   container.x = x;
@@ -770,9 +758,9 @@ function drawUnit(root: Container, unit: UnitState, x: number, y: number, size: 
 
   root.addChild(container);
 }
-function resolveTerrainSprite(state: MatchState, tile: TileState): { texture: Texture; rotation?: number } | null {
+function resolveTerrainSprite(state: MatchState, tile: TileState): { texture: Texture; rotation?: number; tint?: number } | null {
   switch (tile.terrain) {
-    case "plains": return { texture: terrainTextures.plains };
+    case "plains": return { texture: selectPlainsTexture(tile), rotation: terrainRotation(tile), tint: terrainTint(tile) };
     case "forest": return { texture: terrainTextures.forest };
     case "hill": return { texture: terrainTextures.hill };
     case "swamp": return { texture: terrainTextures.swamp };
@@ -786,9 +774,36 @@ function resolveTerrainSprite(state: MatchState, tile: TileState): { texture: Te
   }
 }
 
+function selectPlainsTexture(tile: TileState): Texture {
+  const hash = ((tile.x * 73856093) ^ (tile.y * 19349663)) >>> 0;
+  const variant = hash % 8;
+  if (variant === 0) return terrainTextures.plains2;
+  if (variant === 5) return terrainTextures.plains3;
+  return terrainTextures.plains;
+}
+
 function shouldRotateBridge(state: MatchState, tile: TileState): boolean {
   const riverDirs = neighborDirections(state, tile, ["river"]);
   return riverDirs.includes("n") || riverDirs.includes("s");
+}
+
+function shoreRotation(state: MatchState, tile: TileState): number {
+  const waterDirs = neighborDirections(state, tile, ["water"]);
+  if (waterDirs.includes("s")) return 0;
+  if (waterDirs.includes("w")) return Math.PI / 2;
+  if (waterDirs.includes("n")) return Math.PI;
+  if (waterDirs.includes("e")) return -Math.PI / 2;
+  return 0;
+}
+
+function terrainTint(tile: TileState): number {
+  const variance = ((tile.x * 31 + tile.y * 17) % 5) - 2;
+  const value = clamp(255 + variance * 5, 236, 255);
+  return (value << 16) | (value << 8) | value;
+}
+
+function terrainRotation(tile: TileState): number {
+  return 0;
 }
 
 function neighborDirections(state: MatchState, tile: TileState, kinds: TerrainKind[]): Array<"n" | "s" | "e" | "w"> {
@@ -894,6 +909,8 @@ function terrainPalette(terrain: TerrainKind) {
     case "road": return { base: 0xb7976a, shadow: 0x7a5e44 };
     case "swamp": return { base: 0x5b7353, shadow: 0x314634 };
     case "river": return { base: 0x567ea2, shadow: 0x2b4a64 };
+    case "water": return { base: 0x315f78, shadow: 0x173344 };
+    case "shore": return { base: 0x6f8651, shadow: 0x344627 };
     case "bridge": return { base: 0x7d6040, shadow: 0x4c311f };
     case "village": return { base: 0xb3b98b, shadow: 0x736a48 };
     case "keep": return { base: 0x8f9ca3, shadow: 0x5b6672 };

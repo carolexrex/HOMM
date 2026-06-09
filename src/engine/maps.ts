@@ -20,6 +20,10 @@ function toTerrain(symbol: string): Pick<TileState, "terrain" | "structure"> {
       return { terrain: "swamp" };
     case "~":
       return { terrain: "river" };
+    case "w":
+      return { terrain: "water" };
+    case "c":
+      return { terrain: "shore" };
     case "=":
       return { terrain: "bridge" };
     case "v":
@@ -169,6 +173,19 @@ export const maps: MapDefinition[] = [
       { kind: "catapult", at: { x: 0, y: 3 } }
     ],
     "A larger siege map built around a river gate, bridge pressure, and elevated flanks for ranged pieces."
+  ),
+  buildMap(
+    "lakewatch",
+    "Lakewatch",
+    ["krr..v..", ".fr..r..", "..r.cwww", "v.r.cwww", ".hr.cwww", "..r.cwww", ".fr..r..", "krr..v.."],
+    [
+      { kind: "militia", at: { x: 1, y: 1 } },
+      { kind: "swordsman", at: { x: 2, y: 3 } },
+      { kind: "archer", at: { x: 2, y: 4 } },
+      { kind: "cavalry", at: { x: 1, y: 6 } },
+      { kind: "assassin", at: { x: 1, y: 2 } }
+    ],
+    "A wide central lake blocks the middle, forcing armies through village roads and forested ambush lanes."
   )
 ];
 

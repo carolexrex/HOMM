@@ -61,7 +61,8 @@ const terrainTips = [
   { title: "Forests", body: "High cover for infantry and archers, weak for cavalry." },
   { title: "Hills", body: "Ranged units hit harder from height, and archers gain +1 range." },
   { title: "Roads", body: "Fast movement, low protection." },
-  { title: "Swamps", body: "Slow every heavy piece and punish overextension." }
+  { title: "Swamps", body: "Slow every heavy piece and punish overextension." },
+  { title: "Water", body: "Rivers, shorelines, and deep water block movement unless bridged." }
 ];
 
 const unitMenuArt: Record<UnitKind, string> = {

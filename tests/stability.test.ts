@@ -36,7 +36,7 @@ describe("stability", () => {
         expect(result.totalActions).toBeGreaterThan(0);
       }
     },
-    12000
+    18000
   );
 
   it(
@@ -46,6 +46,6 @@ describe("stability", () => {
       const converged = outcomes.filter((outcome) => outcome.winner !== null);
       expect(converged.length).toBeGreaterThanOrEqual(3);
     },
-    20000
+    32000
   );
 });

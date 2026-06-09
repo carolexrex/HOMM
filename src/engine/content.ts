@@ -191,6 +191,22 @@ export const terrainDefinitions: Record<TerrainKind, TerrainDefinition> = {
     attackBonus: {},
     notes: ["Impassable unless bridged"]
   },
+  water: {
+    kind: "water",
+    label: "Water",
+    defense: 0,
+    moveCost: { foot: 999, cavalry: 999, siege: 999 },
+    attackBonus: {},
+    notes: ["Impassable deep water"]
+  },
+  shore: {
+    kind: "shore",
+    label: "Shore",
+    defense: 0,
+    moveCost: { foot: 999, cavalry: 999, siege: 999 },
+    attackBonus: {},
+    notes: ["Impassable water edge"]
+  },
   bridge: {
     kind: "bridge",
     label: "Bridge",
@@ -239,6 +255,8 @@ export const terrainPalette: Record<TerrainKind, number> = {
   road: 0xb59f72,
   swamp: 0x4a5b42,
   river: 0x406b89,
+  water: 0x315f78,
+  shore: 0x5f8368,
   bridge: 0xa68758,
   village: 0x8f7147,
   keep: 0x725345
