@@ -229,7 +229,7 @@ button:disabled { opacity: 0.45; }
 .play-layout {
   display: grid;
   gap: 0.8rem;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 .play-topbar {
   display: grid;
@@ -710,15 +710,15 @@ button:disabled { opacity: 0.45; }
   }
 
   .play-board {
-    padding: 0.6rem;
+    padding: 0.45rem;
   }
 
   .play-board .canvas-wrap {
-    min-height: min(62vh, 720px);
+    min-height: min(66dvh, 720px);
   }
 
   .play-overlays {
-    inset: 0.6rem;
+    inset: 0.45rem;
   }
 
   .play-selected {
@@ -803,7 +803,7 @@ button:disabled { opacity: 0.45; }
   }
 
   .play-board .canvas-wrap {
-    min-height: min(58vh, 620px);
+    min-height: min(62dvh, 620px);
   }
 
   .play-selected,
@@ -938,12 +938,12 @@ button:disabled { opacity: 0.45; }
   }
 
   .brand-logo-compact {
-    width: min(12rem, 100%);
+    width: min(9.5rem, 100%);
   }
 
   .brand-emblem {
-    width: 1.9rem;
-    height: 1.9rem;
+    width: 1.6rem;
+    height: 1.6rem;
   }
 
   .play-topbar-main-compact {
@@ -1013,6 +1013,12 @@ button:disabled { opacity: 0.45; }
 }
 
 @media (max-width: 900px) {
+  /* Slim the HUD panels so the board gets the reclaimed height */
+  .play-topbar.panel,
+  .play-actions.panel {
+    padding: 0.55rem;
+  }
+
   .play-topbar-main-compact {
     grid-template-columns: minmax(0, 1fr) auto auto auto;
     gap: 0.45rem;
@@ -1078,9 +1084,10 @@ button:disabled { opacity: 0.45; }
     gap: 0.45rem;
   }
 
+  /* 2.75rem = 44px, the minimum comfortable touch target */
   .play-actions button {
-    min-height: 2.9rem;
-    padding: 0.65rem 0.5rem;
+    min-height: 2.75rem;
+    padding: 0.5rem 0.5rem;
     font-size: 0.95rem;
   }
 }
@@ -1116,6 +1123,11 @@ button:disabled { opacity: 0.45; }
 
   .play-actions button {
     font-size: 0.88rem;
+  }
+
+  .play-topbar.panel,
+  .play-actions.panel {
+    padding: 0.5rem;
   }
 }
 
