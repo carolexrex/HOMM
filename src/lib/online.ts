@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, FunctionsHttpError, type SupabaseClient } from "@supabase/supabase-js";
 import type { EconomyMode, MatchState, TurnAction } from "../engine";
 
 const url = import.meta.env.VITE_SUPABASE_URL;
@@ -24,6 +24,24 @@ function getClient(): SupabaseClient | null {
     cachedClient = createClient(url, anonKey);
   }
   return cachedClient;
+}
+
+async function throwFunctionError(error: unknown): Promise<never> {
+  if (error instanceof FunctionsHttpError && error.context instanceof Response) {
+    let message: string | null = null;
+    try {
+      const payload = await error.context.clone().json();
+      if (typeof payload?.error === "string" && payload.error.trim()) {
+        message = payload.error;
+      }
+    } catch {
+      /* fall back to the Supabase error object below */
+    }
+    if (message) {
+      throw new Error(message);
+    }
+  }
+  throw error;
 }
 
 export function createOnlineApi(): OnlineApi {
@@ -58,7 +76,7 @@ export function createOnlineApi(): OnlineApi {
       body: { guestName }
     });
     if (error) {
-      throw error;
+      await throwFunctionError(error);
     }
     return data as { id: string; displayName: string; isGuest: boolean };
   }
@@ -75,7 +93,7 @@ export function createOnlineApi(): OnlineApi {
         body: { action: "create", guestName, mapId, rules }
       });
       if (error) {
-        throw error;
+        await throwFunctionError(error);
       }
       return data as { id: string; inviteCode: string | null; side: "sun"; state: MatchState };
     },
@@ -88,7 +106,7 @@ export function createOnlineApi(): OnlineApi {
         body: { action: "join", guestName, inviteCode }
       });
       if (error) {
-        throw error;
+        await throwFunctionError(error);
       }
       return data as { joined: true; id: string; inviteCode: string | null; side: "sun" | "moon"; state: MatchState };
     },
@@ -101,7 +119,7 @@ export function createOnlineApi(): OnlineApi {
         body: { action: "list", guestName }
       });
       if (error) {
-        throw error;
+        await throwFunctionError(error);
       }
       return (data as { matches: Array<{ id: string; mapId: string; inviteCode: string | null; currentPlayer: string; turnNumber: number; winner: string | null; updatedAt: string; side: "sun" | "moon" | null; state: MatchState }> }).matches;
     },
@@ -114,7 +132,7 @@ export function createOnlineApi(): OnlineApi {
         body: { action: "get", guestName, matchId }
       });
       if (error) {
-        throw error;
+        await throwFunctionError(error);
       }
       return data as { id: string; mapId: string; inviteCode: string | null; currentPlayer: string; turnNumber: number; winner: string | null; updatedAt: string; side: "sun" | "moon"; state: MatchState };
     },
@@ -127,7 +145,7 @@ export function createOnlineApi(): OnlineApi {
         body: { guestName, matchId, actions }
       });
       if (error) {
-        throw error;
+        await throwFunctionError(error);
       }
       return data as { accepted: true; matchId: string; turnNumber: number; currentPlayer: string; winner: string | null; state: MatchState };
     }

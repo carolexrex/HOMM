@@ -1,4 +1,4 @@
-import { PLAYER_NAMES } from "./content.ts";
+import { PLAYER_NAMES, unitDefinitions } from "./content.ts";
 import type { Coord, MapDefinition, PlayerId, TileState, UnitKind, UnitState } from "./types.ts";
 
 const unitId = (owner: PlayerId, kind: UnitKind, x: number, y: number) =>
@@ -56,12 +56,13 @@ function createBoard(rows: string[]): TileState[][] {
 function mirrorUnits(left: Array<{ kind: UnitKind; at: Coord }>, width: number): UnitState[] {
   return left.flatMap(({ kind, at }) => {
     const mirroredX = width - at.x - 1;
+    const maxHp = unitDefinitions[kind].maxHp;
     return [
       {
         id: unitId("sun", kind, at.x, at.y),
         owner: "sun",
         kind,
-        hp: 10,
+        hp: maxHp,
         xp: 0,
         level: 1,
         x: at.x,
@@ -74,7 +75,7 @@ function mirrorUnits(left: Array<{ kind: UnitKind; at: Coord }>, width: number):
         id: unitId("moon", kind, mirroredX, at.y),
         owner: "moon",
         kind,
-        hp: 10,
+        hp: maxHp,
         xp: 0,
         level: 1,
         x: mirroredX,

@@ -1,4 +1,4 @@
-import { attackUnit, availableTargets, createMatch, estimateAttack, getUnitLevel, moveUnit, recruitUnit, reachableTiles } from "../src/engine";
+import { attackUnit, availableTargets, createMatch, estimateAttack, getUnitLevel, healUnit, maps, moveUnit, recruitUnit, reachableTiles, unitDefinitions } from "../src/engine";
 import { describe, expect, it } from "vitest";
 
 describe("engine", () => {
@@ -7,6 +7,14 @@ describe("engine", () => {
     expect(match.board[0][0].structure).toBe("keep");
     expect(match.players.sun.gold).toBe(360);
     expect(match.units.filter((unit) => unit.owner === "sun")).toHaveLength(4);
+  });
+
+  it("starts every map unit at its definition max HP", () => {
+    for (const map of maps) {
+      for (const unit of map.units) {
+        expect(unit.hp).toBe(unitDefinitions[unit.kind].maxHp);
+      }
+    }
   });
 
   it("recruits from an empty keep and spends gold", () => {
@@ -51,6 +59,24 @@ describe("engine", () => {
     expect(availableTargets(match, archer.id).some((unit) => unit.id === target.id)).toBe(true);
     const attack = attackUnit(match, archer.id, target.id);
     expect(attack.ok).toBe(true);
+  });
+
+  it("does not advertise catapult attacks after moving", () => {
+    const match = createMatch("citadel-pass", "hotseat");
+    const catapult = match.units.find((unit) => unit.owner === "sun" && unit.kind === "catapult")!;
+    const target = match.units.find((unit) => unit.owner === "moon")!;
+
+    catapult.x = 3;
+    catapult.y = 3;
+    catapult.moved = true;
+    catapult.acted = false;
+    target.x = 5;
+    target.y = 3;
+    match.units = [catapult, target];
+    match.currentPlayer = "sun";
+
+    expect(availableTargets(match, catapult.id)).toHaveLength(0);
+    expect(attackUnit(match, catapult.id, target.id).ok).toBe(false);
   });
 
   it("awards combat XP and uses elite combat bonuses", () => {
@@ -132,5 +158,24 @@ describe("engine", () => {
     const attack = attackUnit(result.state, assassin.id, moonSword.id);
     expect(attack.ok).toBe(true);
     expect(attack.state.units.find((unit) => unit.id === assassin.id)?.hp).toBe(8);
+  });
+
+  it("rejects healing after the match is finished", () => {
+    const match = createMatch("thornwatch", "hotseat");
+    const healer = match.units.find((unit) => unit.owner === "sun" && unit.kind === "healer")!;
+    const ally = match.units.find((unit) => unit.owner === "sun" && unit.id !== healer.id)!;
+
+    healer.x = 3;
+    healer.y = 3;
+    healer.acted = false;
+    ally.x = 4;
+    ally.y = 3;
+    ally.hp = 4;
+    match.currentPlayer = "sun";
+    match.winner = "sun";
+
+    const result = healUnit(match, healer.id, ally.id);
+    expect(result.ok).toBe(false);
+    expect(result.issue?.code).toBe("match-finished");
   });
 });

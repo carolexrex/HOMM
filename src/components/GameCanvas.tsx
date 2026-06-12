@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Application, Container, Graphics, Sprite, Text, TextStyle, Texture } from "pixi.js";
-import { getUnitLevel, PLAYER_COLORS } from "../engine";
+import { getUnitLevel, PLAYER_COLORS, unitDefinitions } from "../engine";
 import type { Coord, MatchState, TerrainKind, TileState, UnitKind, UnitState } from "../engine";
 import plainsUrl from "../assets/terrain_plains.png";
 import plains2Url from "../assets/terrain_plains_2.png";
@@ -17,8 +17,15 @@ import roadCornerUrl from "../assets/terrain_corner.png";
 import roadCrossroadsUrl from "../assets/terrain_crossroads.png";
 import roadTJunctionUrl from "../assets/terrain_road_t_junction.png";
 import roadTJunctionRightUrl from "../assets/terrain_road_t_junction_right.png";
+import roadTJunctionLeftUrl from "../assets/terrain_road_t_junction_left.png";
+import roadTJunctionUpUrl from "../assets/terrain_road_t_junction_up.png";
 import riverHorizontalUrl from "../assets/terrain_river_horizontal.png";
-import waterFullUrl from "../assets/terrain/water_full.png";
+import riverCornerUrl from "../assets/terrain_river_corner.png";
+import riverTJunctionUrl from "../assets/terrain_river_t_junction.png";
+import riverCrossroadsUrl from "../assets/terrain_river_crossroads.png";
+import riverEdgeUrl from "../assets/terrain_river_edge.png";
+import bridgeWideUrl from "../assets/terrain_bridge_wide.png";
+import waterOpenUrl from "../assets/terrain/water_open.png";
 import shoreOverlayUrl from "../assets/terrain/shore_overlay.png";
 import militiaUrl from "../assets/units/militia.png";
 import swordsmanUrl from "../assets/units/swordsman.png";
@@ -100,6 +107,7 @@ const terrainTextures = {
   hill: Texture.from(hillUrl),
   keep: Texture.from(keepUrl),
   bridge: Texture.from(bridgeUrl),
+  bridgeWide: Texture.from(bridgeWideUrl),
   swamp: Texture.from(swampUrl),
   village: Texture.from(villageUrl)
 };
@@ -110,12 +118,18 @@ const roadTextures = {
   corner: Texture.from(roadCornerUrl),
   cross: Texture.from(roadCrossroadsUrl),
   t: Texture.from(roadTJunctionUrl),
-  tRight: Texture.from(roadTJunctionRightUrl)
+  tRight: Texture.from(roadTJunctionRightUrl),
+  tLeft: Texture.from(roadTJunctionLeftUrl),
+  tUp: Texture.from(roadTJunctionUpUrl)
 };
 
 const riverTextures = {
   horizontal: Texture.from(riverHorizontalUrl),
-  water: Texture.from(waterFullUrl),
+  corner: Texture.from(riverCornerUrl),
+  t: Texture.from(riverTJunctionUrl),
+  cross: Texture.from(riverCrossroadsUrl),
+  edge: Texture.from(riverEdgeUrl),
+  water: Texture.from(waterOpenUrl),
   shore: Texture.from(shoreOverlayUrl)
 };
 
@@ -478,7 +492,15 @@ function drawTerrain(root: Container, state: MatchState, tile: TileState, x: num
   }
 
   if (tile.terrain === "water") {
-    drawBaseTerrainSprite(root, riverTextures.water, x, y, size, 0, terrainTint(tile));
+    // Lake-boundary water gets the same grass-to-water transition as shore
+    // tiles so the bank does not cut off hard against land.
+    const fringe = waterFringeRotation(state, tile);
+    if (fringe === null) {
+      drawBaseTerrainSprite(root, riverTextures.water, x, y, size, 0, terrainTint(tile));
+    } else {
+      drawPlainsTile(root, tile, x, y, size);
+      drawBaseTerrainSprite(root, riverTextures.shore, x, y, size, fringe);
+    }
     return;
   }
 
@@ -563,9 +585,7 @@ function drawRoadTile(root: Container, state: MatchState, tile: TileState, x: nu
 }
 
 function drawRiverTile(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
-  const dirs = neighborDirections(state, tile, ["river"]);
-  const activeDirs: Array<"n" | "s" | "e" | "w"> = dirs.length > 0 ? dirs : ["e", "w"];
-  const config = resolveRiverSprite(activeDirs);
+  const config = resolveRiverSprite(state, tile);
   drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation);
 }
 
@@ -585,9 +605,9 @@ function resolveRoadSprite(dirs: Array<"n" | "s" | "e" | "w">): { texture: Textu
   }
 
   if (dirs.length === 3) {
-    if (!hasN) return { texture: roadTextures.t, rotation: 0 };
-    if (!hasE) return { texture: roadTextures.t, rotation: Math.PI / 2 };
-    if (!hasS) return { texture: roadTextures.t, rotation: Math.PI };
+    if (!hasN) return { texture: roadTextures.t };
+    if (!hasE) return { texture: roadTextures.tLeft };
+    if (!hasS) return { texture: roadTextures.tUp };
     return { texture: roadTextures.tRight };
   }
 
@@ -606,14 +626,56 @@ function resolveRoadSprite(dirs: Array<"n" | "s" | "e" | "w">): { texture: Textu
   return { texture: roadTextures.horizontal };
 }
 
-function resolveRiverSprite(dirs: Array<"n" | "s" | "e" | "w">): { texture: Texture; rotation?: number } {
+function riverLikeAt(state: MatchState, x: number, y: number): boolean {
+  const next = state.board[y]?.[x];
+  return !!next && (next.terrain === "river" || next.terrain === "bridge");
+}
+
+function resolveRiverSprite(state: MatchState, tile: TileState): { texture: Texture; rotation?: number } {
+  const dirs = neighborDirections(state, tile, ["river", "bridge"]);
   const hasN = dirs.includes("n");
   const hasS = dirs.includes("s");
   const hasE = dirs.includes("e");
   const hasW = dirs.includes("w");
+  const { x, y } = tile;
+
+  // Two parallel river tiles form one wide river: each half uses the edge tile
+  // with its water flush against the shared seam. Detected by a side-by-side
+  // partner that shares a diagonal continuation.
+  if (hasE && !riverLikeAt(state, x + 2, y) && ((hasN && riverLikeAt(state, x + 1, y - 1)) || (hasS && riverLikeAt(state, x + 1, y + 1)))) {
+    return { texture: riverTextures.edge };
+  }
+  if (hasW && !riverLikeAt(state, x - 2, y) && ((hasN && riverLikeAt(state, x - 1, y - 1)) || (hasS && riverLikeAt(state, x - 1, y + 1)))) {
+    return { texture: riverTextures.edge, rotation: Math.PI };
+  }
+  if (hasS && !riverLikeAt(state, x, y + 2) && ((hasE && riverLikeAt(state, x + 1, y + 1)) || (hasW && riverLikeAt(state, x - 1, y + 1)))) {
+    return { texture: riverTextures.edge, rotation: Math.PI / 2 };
+  }
+  if (hasN && !riverLikeAt(state, x, y - 2) && ((hasE && riverLikeAt(state, x + 1, y - 1)) || (hasW && riverLikeAt(state, x - 1, y - 1)))) {
+    return { texture: riverTextures.edge, rotation: -Math.PI / 2 };
+  }
+
+  if (dirs.length >= 4) {
+    return { texture: riverTextures.cross };
+  }
+
+  if (dirs.length === 3) {
+    if (!hasN) return { texture: riverTextures.t, rotation: 0 };
+    if (!hasE) return { texture: riverTextures.t, rotation: Math.PI / 2 };
+    if (!hasS) return { texture: riverTextures.t, rotation: Math.PI };
+    return { texture: riverTextures.t, rotation: -Math.PI / 2 };
+  }
+
+  if (dirs.length === 2) {
+    if (hasN && hasS) return { texture: riverTextures.horizontal, rotation: Math.PI / 2 };
+    if (hasE && hasW) return { texture: riverTextures.horizontal };
+    if (hasE && hasS) return { texture: riverTextures.corner, rotation: 0 };
+    if (hasS && hasW) return { texture: riverTextures.corner, rotation: Math.PI / 2 };
+    if (hasN && hasW) return { texture: riverTextures.corner, rotation: Math.PI };
+    return { texture: riverTextures.corner, rotation: -Math.PI / 2 };
+  }
 
   if (hasN || hasS) return { texture: riverTextures.horizontal, rotation: Math.PI / 2 };
-  if (hasE || hasW) return { texture: riverTextures.horizontal };
   return { texture: riverTextures.horizontal };
 }
 
@@ -738,7 +800,7 @@ function drawUnit(root: Container, unit: UnitState, x: number, y: number, size: 
 
   const hpFill = new Graphics();
   hpFill.beginFill(0x98df9d, 0.96);
-  hpFill.drawRoundedRect(size * 0.14, hpTrackY, size * 0.72 * (unit.hp / 10), size * 0.08, size * 0.04);
+  hpFill.drawRoundedRect(size * 0.14, hpTrackY, size * 0.72 * (unit.hp / unitDefinitions[unit.kind].maxHp), size * 0.08, size * 0.04);
   hpFill.endFill();
   container.addChild(hpFill);
 
@@ -766,10 +828,19 @@ function resolveTerrainSprite(state: MatchState, tile: TileState): { texture: Te
     case "swamp": return { texture: terrainTextures.swamp };
     case "village": return { texture: terrainTextures.village };
     case "keep": return { texture: terrainTextures.keep };
-    case "bridge": return {
-      texture: terrainTextures.bridge,
-      rotation: shouldRotateBridge(state, tile) ? Math.PI / 2 : 0
-    };
+    case "bridge": {
+      // Two adjacent bridge tiles span a wide river: each half uses the wide
+      // deck tile, with the approach ramp facing away from the shared seam.
+      const span = neighborDirections(state, tile, ["bridge"]);
+      if (span.includes("e")) return { texture: terrainTextures.bridgeWide };
+      if (span.includes("w")) return { texture: terrainTextures.bridgeWide, rotation: Math.PI };
+      if (span.includes("s")) return { texture: terrainTextures.bridgeWide, rotation: Math.PI / 2 };
+      if (span.includes("n")) return { texture: terrainTextures.bridgeWide, rotation: -Math.PI / 2 };
+      return {
+        texture: terrainTextures.bridge,
+        rotation: shouldRotateBridge(state, tile) ? Math.PI / 2 : 0
+      };
+    }
     default: return null;
   }
 }
@@ -785,6 +856,21 @@ function selectPlainsTexture(tile: TileState): Texture {
 function shouldRotateBridge(state: MatchState, tile: TileState): boolean {
   const riverDirs = neighborDirections(state, tile, ["river"]);
   return riverDirs.includes("n") || riverDirs.includes("s");
+}
+
+function waterFringeRotation(state: MatchState, tile: TileState): number | null {
+  const landDirs: Array<"n" | "s" | "e" | "w"> = [];
+  const checks: Array<["n" | "s" | "e" | "w", number, number]> = [["n", 0, -1], ["s", 0, 1], ["w", -1, 0], ["e", 1, 0]];
+  for (const [dir, dx, dy] of checks) {
+    const next = state.board[tile.y + dy]?.[tile.x + dx];
+    if (next && next.terrain !== "water" && next.terrain !== "shore") landDirs.push(dir);
+  }
+  // shore overlay has grass at N when unrotated; turn the grass toward the land
+  if (landDirs.includes("n")) return 0;
+  if (landDirs.includes("s")) return Math.PI;
+  if (landDirs.includes("w")) return -Math.PI / 2;
+  if (landDirs.includes("e")) return Math.PI / 2;
+  return null;
 }
 
 function shoreRotation(state: MatchState, tile: TileState): number {
@@ -1050,7 +1136,6 @@ const hintStyle: React.CSSProperties = {
   zIndex: 2,
   maxWidth: "calc(100% - 120px)"
 };
-
 
 
 

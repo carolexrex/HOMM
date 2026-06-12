@@ -612,6 +612,9 @@ export function App() {
     if (!match || busy) {
       return;
     }
+    if (match.winner) {
+      return;
+    }
     if (match.mode === "online" && !isOnlineLocalTurn) {
       setMessage("Wait for your turn, then refresh when your opponent finishes.");
       return;
@@ -632,10 +635,11 @@ export function App() {
     }
 
     if (occupant && selectedUnit.kind === "healer" && healableIds.includes(occupant.id)) {
-      if (match.mode === "online") {
+      const result = healUnit(match, selectedUnit.id, occupant.id);
+      if (result.ok && match.mode === "online") {
         queueOnlineAction({ type: "heal", healerId: selectedUnit.id, targetId: occupant.id });
       }
-      applyResult(healUnit(match, selectedUnit.id, occupant.id));
+      applyResult(result);
       return;
     }
 
@@ -646,10 +650,15 @@ export function App() {
     }
 
     if (occupant && occupant.owner !== match.currentPlayer) {
-      if (match.mode === "online") {
+      if (!attackableIds.includes(occupant.id)) {
+        applyResult(attackUnit(match, selectedUnit.id, occupant.id));
+        return;
+      }
+      const result = attackUnit(match, selectedUnit.id, occupant.id);
+      if (result.ok && match.mode === "online") {
         queueOnlineAction({ type: "attack", attackerId: selectedUnit.id, targetId: occupant.id });
       }
-      applyResult(attackUnit(match, selectedUnit.id, occupant.id));
+      applyResult(result);
       return;
     }
 
@@ -816,7 +825,7 @@ export function App() {
                   <div className="eyebrow">Selected Unit</div>
                   <strong>{unitDefinitions[selectedUnit.kind].label}</strong>
                   <div className="muted">
-                    HP {selectedUnit.hp}/10 / Move {unitDefinitions[selectedUnit.kind].move} / Range {selectedRange?.min ?? unitDefinitions[selectedUnit.kind].minRange}-{selectedRange?.max ?? unitDefinitions[selectedUnit.kind].maxRange}
+                    HP {selectedUnit.hp}/{unitDefinitions[selectedUnit.kind].maxHp} / Move {unitDefinitions[selectedUnit.kind].move} / Range {selectedRange?.min ?? unitDefinitions[selectedUnit.kind].minRange}-{selectedRange?.max ?? unitDefinitions[selectedUnit.kind].maxRange}
                   </div>
                   <div className="muted">
                     Level {getUnitLevel(selectedUnit)} / XP {getUnitXp(selectedUnit)}{getXpForNextLevel(selectedUnit) ? `/${getXpForNextLevel(selectedUnit)}` : " / max"}
@@ -1164,8 +1173,6 @@ export function App() {
     </main>
   );
 }
-
-
 
 
 

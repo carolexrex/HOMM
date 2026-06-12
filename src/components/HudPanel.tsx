@@ -84,7 +84,7 @@ export function HudPanel({
           <div className="unit-card active">
             <strong>{unitDefinitions[selectedUnit.kind].label}</strong>
             <div className="muted">
-              HP {selectedUnit.hp}/10 / Move {unitDefinitions[selectedUnit.kind].move} / Range {unitDefinitions[selectedUnit.kind].minRange}-{unitDefinitions[selectedUnit.kind].maxRange}
+              HP {selectedUnit.hp}/{unitDefinitions[selectedUnit.kind].maxHp} / Move {unitDefinitions[selectedUnit.kind].move} / Range {unitDefinitions[selectedUnit.kind].minRange}-{unitDefinitions[selectedUnit.kind].maxRange}
             </div>
             <div className="muted">{unitDefinitions[selectedUnit.kind].notes.join(" / ")}</div>
             <div className="actions" style={{ marginTop: "0.8rem" }}>

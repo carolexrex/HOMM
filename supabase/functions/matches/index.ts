@@ -3,6 +3,13 @@ import { ensurePlayerProfile, getServiceClient } from "../_shared/supabase.ts";
 import { createMatch } from "../../../src/engine/game.ts";
 import type { EconomyMode } from "../../../src/engine/types.ts";
 
+function matchActionStatus(error: { message?: string }): number {
+  const message = error.message?.toLowerCase?.() ?? "";
+  if (message.includes("not found")) return 404;
+  if (message.includes("already full") || message.includes("duplicate") || message.includes("unique")) return 409;
+  return 500;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -24,32 +31,19 @@ Deno.serve(async (request) => {
       const match = createMatch(mapId, "online", "normal", { economyMode });
 
       const { data: createdMatch, error: createError } = await supabase
-        .from("matches")
-        .insert({
-          mode: "online",
-          map_id: match.mapId,
-          invite_code: match.inviteCode,
-          current_player: match.currentPlayer,
-          turn_number: match.turnNumber,
-          winner: match.winner,
-          state: match,
-          created_by: account.userId
+        .rpc("create_online_match", {
+          p_created_by: account.userId,
+          p_map_id: match.mapId,
+          p_invite_code: match.inviteCode,
+          p_current_player: match.currentPlayer,
+          p_turn_number: match.turnNumber,
+          p_winner: match.winner,
+          p_state: match
         })
-        .select("id, invite_code, state, map_id, current_player, turn_number, winner, updated_at")
         .single();
 
       if (createError) {
         throw createError;
-      }
-
-      const { error: playerError } = await supabase.from("match_players").insert({
-        match_id: createdMatch.id,
-        user_id: account.userId,
-        side: "sun"
-      });
-
-      if (playerError) {
-        throw playerError;
       }
 
       return Response.json(
@@ -70,75 +64,27 @@ Deno.serve(async (request) => {
       }
 
       const account = await ensurePlayerProfile(request, body?.guestName);
-      const { data: matchRow, error: matchError } = await supabase
-        .from("matches")
-        .select("id, invite_code, state, winner")
-        .eq("invite_code", inviteCode)
-        .maybeSingle();
-
-      if (matchError) {
-        throw matchError;
-      }
-      if (!matchRow) {
-        return Response.json({ error: "Match not found." }, { headers: corsHeaders, status: 404 });
-      }
-
-      const { data: existingSeat, error: existingSeatError } = await supabase
-        .from("match_players")
-        .select("side")
-        .eq("match_id", matchRow.id)
-        .eq("user_id", account.userId)
-        .maybeSingle();
-
-      if (existingSeatError) {
-        throw existingSeatError;
-      }
-
-      if (existingSeat) {
-        return Response.json(
-          {
-            joined: true,
-            id: matchRow.id,
-            inviteCode: matchRow.invite_code,
-            side: existingSeat.side,
-            state: matchRow.state
-          },
-          { headers: corsHeaders }
-        );
-      }
-
-      const { data: moonSeat, error: moonSeatError } = await supabase
-        .from("match_players")
-        .select("id")
-        .eq("match_id", matchRow.id)
-        .eq("side", "moon")
-        .maybeSingle();
-
-      if (moonSeatError) {
-        throw moonSeatError;
-      }
-
-      if (moonSeat) {
-        return Response.json({ error: "Match is already full." }, { headers: corsHeaders, status: 409 });
-      }
-
-      const { error: joinError } = await supabase.from("match_players").insert({
-        match_id: matchRow.id,
-        user_id: account.userId,
-        side: "moon"
-      });
+      const { data: joinedMatch, error: joinError } = await supabase
+        .rpc("join_online_match", {
+          p_invite_code: inviteCode,
+          p_user_id: account.userId
+        })
+        .single();
 
       if (joinError) {
-        throw joinError;
+        return Response.json(
+          { error: joinError.message },
+          { headers: corsHeaders, status: matchActionStatus(joinError) }
+        );
       }
 
       return Response.json(
         {
           joined: true,
-          id: matchRow.id,
-          inviteCode: matchRow.invite_code,
-          side: "moon",
-          state: matchRow.state
+          id: joinedMatch.id,
+          inviteCode: joinedMatch.invite_code,
+          side: joinedMatch.side,
+          state: joinedMatch.state
         },
         { headers: corsHeaders }
       );

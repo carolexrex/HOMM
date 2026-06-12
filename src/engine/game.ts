@@ -250,7 +250,10 @@ function checkVictory(state: MatchState): void {
 
 export function availableTargets(state: MatchState, unitId: string): UnitState[] {
   const unit = getUnit(state, unitId);
-  if (!unit) {
+  if (!unit || state.winner || unit.owner !== state.currentPlayer || unit.acted) {
+    return [];
+  }
+  if (unitDefinitions[unit.kind].cannotAttackAfterMove && unit.moved) {
     return [];
   }
   const range = getUnitRange(state, unit);
@@ -265,7 +268,7 @@ export function availableTargets(state: MatchState, unitId: string): UnitState[]
 
 export function availableHeals(state: MatchState, unitId: string): UnitState[] {
   const unit = getUnit(state, unitId);
-  if (!unit || !unitDefinitions[unit.kind].canHeal) {
+  if (!unit || state.winner || unit.owner !== state.currentPlayer || unit.acted || !unitDefinitions[unit.kind].canHeal) {
     return [];
   }
   return state.units.filter((target) => {
@@ -393,6 +396,10 @@ export function attackUnit(state: MatchState, attackerId: string, targetId: stri
 
 export function healUnit(state: MatchState, healerId: string, targetId: string): GameResult {
   const next = cloneState(state);
+  if (next.winner) {
+    return fail(next, "match-finished", "The match is already over.");
+  }
+
   const healer = ensureActiveUnit(next, healerId);
   const target = getUnit(next, targetId);
   if (!healer || !target) {
@@ -553,7 +560,6 @@ export function getRecruitOptions(state: MatchState): Array<{ kind: UnitKind; af
     affordable: state.players[state.currentPlayer].gold >= unitDefinitions[kind].cost
   }));
 }
-
 
 
 

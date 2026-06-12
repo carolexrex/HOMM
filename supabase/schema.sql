@@ -204,6 +204,169 @@ with check (
   )
 );
 
+create or replace function public.create_online_match(
+  p_created_by uuid,
+  p_map_id text,
+  p_invite_code text,
+  p_current_player text,
+  p_turn_number integer,
+  p_winner text,
+  p_state jsonb
+)
+returns table (
+  id uuid,
+  invite_code text,
+  state jsonb
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  created record;
+begin
+  insert into public.matches (
+    mode,
+    map_id,
+    invite_code,
+    current_player,
+    turn_number,
+    winner,
+    state,
+    created_by
+  )
+  values (
+    'online',
+    p_map_id,
+    p_invite_code,
+    p_current_player,
+    p_turn_number,
+    p_winner,
+    p_state,
+    p_created_by
+  )
+  returning matches.id, matches.invite_code, matches.state
+  into created;
+
+  insert into public.match_players (
+    match_id,
+    user_id,
+    side
+  )
+  values (
+    created.id,
+    p_created_by,
+    'sun'
+  );
+
+  id := created.id;
+  invite_code := created.invite_code;
+  state := created.state;
+  return next;
+end;
+$$;
+
+create or replace function public.join_online_match(
+  p_invite_code text,
+  p_user_id uuid
+)
+returns table (
+  id uuid,
+  invite_code text,
+  side text,
+  state jsonb
+)
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  match_row record;
+  existing_side text;
+begin
+  select matches.id, matches.invite_code, matches.state
+  into match_row
+  from public.matches
+  where matches.invite_code = p_invite_code
+  for update;
+
+  if not found then
+    raise exception 'Match not found.';
+  end if;
+
+  select match_players.side
+  into existing_side
+  from public.match_players
+  where match_players.match_id = match_row.id
+    and match_players.user_id = p_user_id;
+
+  if found then
+    id := match_row.id;
+    invite_code := match_row.invite_code;
+    side := existing_side;
+    state := match_row.state;
+    return next;
+    return;
+  end if;
+
+  if exists (
+    select 1
+    from public.match_players
+    where match_players.match_id = match_row.id
+      and match_players.side = 'moon'
+  ) then
+    raise exception 'Match is already full.';
+  end if;
+
+  insert into public.match_players (
+    match_id,
+    user_id,
+    side
+  )
+  values (
+    match_row.id,
+    p_user_id,
+    'moon'
+  );
+
+  id := match_row.id;
+  invite_code := match_row.invite_code;
+  side := 'moon';
+  state := match_row.state;
+  return next;
+end;
+$$;
+
+revoke all on function public.create_online_match(
+  uuid,
+  text,
+  text,
+  text,
+  integer,
+  text,
+  jsonb
+) from public, anon, authenticated;
+
+grant execute on function public.create_online_match(
+  uuid,
+  text,
+  text,
+  text,
+  integer,
+  text,
+  jsonb
+) to service_role;
+
+revoke all on function public.join_online_match(
+  text,
+  uuid
+) from public, anon, authenticated;
+
+grant execute on function public.join_online_match(
+  text,
+  uuid
+) to service_role;
+
 create or replace function public.commit_match_turn(
   p_match_id uuid,
   p_player_side text,
