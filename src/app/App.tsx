@@ -235,7 +235,7 @@ export function App() {
   const reachable = match && selectedUnit && !selectedUnit.moved ? reachableTiles(match, selectedUnit.id) : [];
   const attackableIds = match && selectedUnit && !selectedUnit.acted ? availableTargets(match, selectedUnit.id).map((unit) => unit.id) : [];
   const healableIds = match && selectedUnit && !selectedUnit.acted ? availableHeals(match, selectedUnit.id).map((unit) => unit.id) : [];
-  const isOnlineLocalTurn = Boolean(match && match.mode === "online" && onlineSession?.matchId === match.id && onlineSession.side === match.currentPlayer);
+  const isOnlineLocalTurn = Boolean(match && match.mode === "online" && onlineSession && onlineSession.side === match.currentPlayer);
   const combatPreviews = useMemo(() => {
     if (!match || !selectedUnit || selectedUnit.acted) {
       return {};
@@ -452,8 +452,37 @@ export function App() {
     setMessage(next.issue?.message ?? "That action failed.");
   }
 
-  function queueOnlineAction(action: TurnAction) {
-    pendingOnlineActionsRef.current = [...pendingOnlineActionsRef.current, action];
+  function queueOnlineAction(action: TurnAction): TurnAction[] {
+    const actions = [...pendingOnlineActionsRef.current, action];
+    pendingOnlineActionsRef.current = actions;
+    return actions;
+  }
+
+  async function submitOnlineActions(actions: TurnAction[]) {
+    if (!onlineSession) {
+      setMessage("Online session details are missing. Refresh the match and try again.");
+      return;
+    }
+
+    setBusy(true);
+    setSelectedUnitId(null);
+    try {
+      const account = await ensureOnlineAccount();
+      const committed = await onlineApi.submitTurn(onlineSession.matchId, actions, account.guestName);
+      pendingOnlineActionsRef.current = [];
+      setMatch(committed.state);
+      setMessage(committed.winner ? `${committed.state.players[committed.winner as "sun" | "moon"].name} won.` : "Turn submitted. Waiting for opponent.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Online turn submission failed.");
+      const account = loadAccount() ?? { guestName: "Guest Banner" };
+      const latest = await onlineApi.getMatch(onlineSession.matchId, account.guestName).catch(() => null);
+      pendingOnlineActionsRef.current = [];
+      if (latest) {
+        setMatch(latest.state);
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   function handleTileTap(coord: { x: number; y: number }) {
@@ -504,7 +533,11 @@ export function App() {
       }
       const result = attackUnit(match, selectedUnit.id, occupant.id);
       if (result.ok && match.mode === "online") {
-        queueOnlineAction({ type: "attack", attackerId: selectedUnit.id, targetId: occupant.id });
+        const actions = queueOnlineAction({ type: "attack", attackerId: selectedUnit.id, targetId: occupant.id });
+        if (result.state.winner) {
+          void submitOnlineActions(actions);
+          return;
+        }
       }
       applyResult(result);
       return;
@@ -558,25 +591,7 @@ export function App() {
 
     const actions = [...pendingOnlineActionsRef.current, { type: "end_turn" } as TurnAction];
 
-    setBusy(true);
-    setSelectedUnitId(null);
-    try {
-      const account = await ensureOnlineAccount();
-      const committed = await onlineApi.submitTurn(onlineSession.matchId, actions, account.guestName);
-      pendingOnlineActionsRef.current = [];
-      setMatch(committed.state);
-      setMessage(committed.winner ? `${committed.state.players[committed.winner as "sun" | "moon"].name} won.` : "Turn submitted. Waiting for opponent.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Online turn submission failed.");
-      const account = loadAccount() ?? { guestName: "Guest Banner" };
-      const latest = await onlineApi.getMatch(onlineSession.matchId, account.guestName).catch(() => null);
-      pendingOnlineActionsRef.current = [];
-      if (latest) {
-        setMatch(latest.state);
-      }
-    } finally {
-      setBusy(false);
-    }
+    await submitOnlineActions(actions);
   }
 
   function leaveMatch() {

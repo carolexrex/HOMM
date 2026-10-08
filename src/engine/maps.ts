@@ -201,7 +201,10 @@ export function getMapSummary(id: string): string {
 }
 
 export function createInviteCode(): string {
-  return Math.random().toString(36).slice(2, 7).toUpperCase();
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const random = new Uint8Array(10);
+  crypto.getRandomValues(random);
+  return Array.from(random, (value) => alphabet[value % alphabet.length]).join("");
 }
 
 export function playerBannerName(player: PlayerId): string {

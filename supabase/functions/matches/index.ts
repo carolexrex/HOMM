@@ -5,9 +5,14 @@ import type { EconomyMode } from "../../../src/engine/types.ts";
 
 function matchActionStatus(error: { message?: string }): number {
   const message = error.message?.toLowerCase?.() ?? "";
+  if (message.includes("too many join attempts")) return 429;
   if (message.includes("not found")) return 404;
   if (message.includes("already full") || message.includes("duplicate") || message.includes("unique")) return 409;
   return 500;
+}
+
+function isInviteCollision(error: { code?: string; message?: string }): boolean {
+  return error.code === "23505" && (error.message?.toLowerCase().includes("invite_code") ?? false);
 }
 
 Deno.serve(async (request) => {
@@ -28,42 +33,61 @@ Deno.serve(async (request) => {
 
       const account = await ensurePlayerProfile(request, body?.guestName);
       const economyMode: EconomyMode = body?.rules?.economyMode === "skirmish" ? "skirmish" : "standard";
-      const match = createMatch(mapId, "online", "normal", { economyMode });
+      let lastCreateError: { code?: string; message?: string } | null = null;
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const match = createMatch(mapId, "online", "normal", { economyMode });
+        const { data: createdMatch, error: createError } = await supabase
+          .rpc("create_online_match", {
+            p_created_by: account.userId,
+            p_map_id: match.mapId,
+            p_invite_code: match.inviteCode,
+            p_current_player: match.currentPlayer,
+            p_turn_number: match.turnNumber,
+            p_winner: match.winner,
+            p_state: match
+          })
+          .single();
 
-      const { data: createdMatch, error: createError } = await supabase
-        .rpc("create_online_match", {
-          p_created_by: account.userId,
-          p_map_id: match.mapId,
-          p_invite_code: match.inviteCode,
-          p_current_player: match.currentPlayer,
-          p_turn_number: match.turnNumber,
-          p_winner: match.winner,
-          p_state: match
-        })
-        .single();
+        if (!createError) {
+          return Response.json(
+            {
+              id: createdMatch.id,
+              inviteCode: createdMatch.invite_code,
+              side: "sun",
+              state: createdMatch.state
+            },
+            { headers: corsHeaders }
+          );
+        }
 
-      if (createError) {
-        throw createError;
+        lastCreateError = createError;
+        if (!isInviteCollision(createError)) {
+          throw createError;
+        }
       }
-
-      return Response.json(
-        {
-          id: createdMatch.id,
-          inviteCode: createdMatch.invite_code,
-          side: "sun",
-          state: createdMatch.state
-        },
-        { headers: corsHeaders }
-      );
+      throw lastCreateError ?? new Error("Could not allocate a unique invite code.");
     }
 
     if (action === "join") {
       const inviteCode = String(body?.inviteCode ?? "").trim().toUpperCase();
-      if (!inviteCode) {
-        return Response.json({ error: "inviteCode is required." }, { headers: corsHeaders, status: 400 });
+      if (!/^[A-Z0-9]{5,10}$/.test(inviteCode)) {
+        return Response.json({ error: "Enter a valid invite code." }, { headers: corsHeaders, status: 400 });
       }
 
       const account = await ensurePlayerProfile(request, body?.guestName);
+      const { data: joinAllowed, error: rateLimitError } = await supabase
+        .rpc("register_invite_join_attempt", { p_user_id: account.userId });
+
+      if (rateLimitError) {
+        throw rateLimitError;
+      }
+      if (!joinAllowed) {
+        return Response.json(
+          { error: "Too many join attempts. Wait a minute and try again." },
+          { headers: corsHeaders, status: 429 }
+        );
+      }
+
       const { data: joinedMatch, error: joinError } = await supabase
         .rpc("join_online_match", {
           p_invite_code: inviteCode,

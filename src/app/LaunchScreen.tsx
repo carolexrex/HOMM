@@ -126,9 +126,12 @@ export function LaunchScreen({
                 type="text"
                 inputMode="text"
                 autoCapitalize="characters"
+                autoComplete="off"
+                maxLength={10}
+                spellCheck={false}
                 placeholder="Invite code"
                 value={onlineInviteCode}
-                onChange={(event) => setOnlineInviteCode(event.target.value.toUpperCase())}
+                onChange={(event) => setOnlineInviteCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10))}
               />
               <button type="button" disabled={onlineBusy || !onlineInviteCode.trim()} onClick={() => joinOnlineMatch()}>
                 Join Match

@@ -1,7 +1,9 @@
 import { corsHeaders } from "../_shared/cors.ts";
 import { ensurePlayerProfile, getServiceClient } from "../_shared/supabase.ts";
-import { applyTurnActions } from "../../../src/engine/game.ts";
-import type { MatchState, TurnAction } from "../../../src/engine/types.ts";
+import { applyOnlineTurnSubmission } from "../../../src/engine/game.ts";
+import type { MatchState } from "../../../src/engine/types.ts";
+
+const MAX_TURN_BODY_CHARS = 64 * 1024;
 
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") {
@@ -9,15 +11,19 @@ Deno.serve(async (request) => {
   }
 
   try {
-    const body = await request.json();
+    const rawBody = await request.text();
+    if (rawBody.length > MAX_TURN_BODY_CHARS) {
+      return Response.json({ error: "Turn submission is too large." }, { headers: corsHeaders, status: 413 });
+    }
+    const body = JSON.parse(rawBody);
     const guestName = body?.guestName as string | undefined;
     const matchId = body?.matchId as string | undefined;
-    const actions = Array.isArray(body?.actions) ? (body.actions as TurnAction[]) : [];
+    const actions = body?.actions as unknown;
 
     if (!matchId) {
       return Response.json({ error: "matchId is required." }, { headers: corsHeaders, status: 400 });
     }
-    if (!actions.length) {
+    if (!Array.isArray(actions) || !actions.length) {
       return Response.json({ error: "actions are required." }, { headers: corsHeaders, status: 400 });
     }
 
@@ -49,42 +55,25 @@ Deno.serve(async (request) => {
     }
 
     const side = seat.side as "sun" | "moon";
-    if ((matchRow.current_player as string) !== side) {
-      return Response.json({ error: "It is not your turn." }, { headers: corsHeaders, status: 409 });
-    }
-    if (matchRow.winner) {
-      return Response.json({ error: "The match is already finished." }, { headers: corsHeaders, status: 409 });
-    }
-    if (actions[actions.length - 1]?.type !== "end_turn") {
-      return Response.json({ error: "Submitted online turns must end with end_turn." }, { headers: corsHeaders, status: 400 });
-    }
-
     const canonical = matchRow.state as MatchState;
-    const applied = applyTurnActions(canonical, actions);
+    const applied = applyOnlineTurnSubmission(canonical, side, actions);
     if (!applied.ok) {
       return Response.json(
         {
-          error: applied.issue?.message ?? "Illegal turn submission.",
-          issue: applied.issue ?? null,
+          error: applied.error,
           state: canonical
         },
-        { headers: corsHeaders, status: 400 }
+        { headers: corsHeaders, status: applied.error === "It is not your turn." || applied.error === "The match is already finished." ? 409 : 400 }
       );
     }
 
     const resultingState = applied.state;
-    if (resultingState.currentPlayer === side && !resultingState.winner) {
-      return Response.json(
-        { error: "Turn submission did not pass control to the opponent.", state: canonical },
-        { headers: corsHeaders, status: 400 }
-      );
-    }
 
     const { error: commitError } = await supabase.rpc("commit_match_turn", {
       p_match_id: matchId,
       p_player_side: side,
       p_turn_number: matchRow.turn_number,
-      p_actions: actions,
+      p_actions: applied.actions,
       p_resulting_state: resultingState,
       p_next_current_player: resultingState.currentPlayer,
       p_next_turn_number: resultingState.turnNumber,

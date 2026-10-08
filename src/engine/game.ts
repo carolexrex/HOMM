@@ -38,6 +38,104 @@ function fail(state: MatchState, code: GameIssueCode, message: string): GameResu
   return { ok: false, state, issue: { code, message } };
 }
 
+export const MAX_ONLINE_TURN_ACTIONS = 128;
+
+export type OnlineTurnSubmissionResult =
+  | { ok: true; state: MatchState; actions: TurnAction[] }
+  | { ok: false; state: MatchState; error: string };
+
+function isShortId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 128;
+}
+
+function isUnitKind(value: unknown): value is UnitKind {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(unitDefinitions, value);
+}
+
+function parseTurnAction(value: unknown): TurnAction | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const action = value as Record<string, unknown>;
+  switch (action.type) {
+    case "move": {
+      const to = action.to;
+      if (!isShortId(action.unitId) || !to || typeof to !== "object") return null;
+      const coord = to as Record<string, unknown>;
+      if (!Number.isInteger(coord.x) || !Number.isInteger(coord.y)) return null;
+      return { type: "move", unitId: action.unitId, to: { x: coord.x as number, y: coord.y as number } };
+    }
+    case "attack":
+      return isShortId(action.attackerId) && isShortId(action.targetId)
+        ? { type: "attack", attackerId: action.attackerId, targetId: action.targetId }
+        : null;
+    case "heal":
+      return isShortId(action.healerId) && isShortId(action.targetId)
+        ? { type: "heal", healerId: action.healerId, targetId: action.targetId }
+        : null;
+    case "recruit":
+      return isUnitKind(action.kind) ? { type: "recruit", kind: action.kind } : null;
+    case "end_turn":
+      return { type: "end_turn" };
+    default:
+      return null;
+  }
+}
+
+export function applyOnlineTurnSubmission(
+  canonical: MatchState,
+  submittingPlayer: PlayerId,
+  input: unknown
+): OnlineTurnSubmissionResult {
+  const original = cloneState(canonical);
+  if (canonical.winner) {
+    return { ok: false, state: original, error: "The match is already finished." };
+  }
+  if (canonical.currentPlayer !== submittingPlayer) {
+    return { ok: false, state: original, error: "It is not your turn." };
+  }
+  if (!Array.isArray(input) || input.length === 0) {
+    return { ok: false, state: original, error: "Actions are required." };
+  }
+  if (input.length > MAX_ONLINE_TURN_ACTIONS) {
+    return { ok: false, state: original, error: `A turn may contain at most ${MAX_ONLINE_TURN_ACTIONS} actions.` };
+  }
+
+  const actions: TurnAction[] = [];
+  for (const value of input) {
+    const action = parseTurnAction(value);
+    if (!action) {
+      return { ok: false, state: original, error: "Turn submission contains a malformed action." };
+    }
+    actions.push(action);
+  }
+
+  const endTurnIndexes = actions.flatMap((action, index) => action.type === "end_turn" ? [index] : []);
+  if (endTurnIndexes.length > 1 || (endTurnIndexes.length === 1 && endTurnIndexes[0] !== actions.length - 1)) {
+    return { ok: false, state: original, error: "A submitted turn may contain one end_turn action, and it must be last." };
+  }
+
+  const applied = applyTurnActions(canonical, actions);
+  if (!applied.ok) {
+    return { ok: false, state: original, error: applied.issue?.message ?? "Illegal turn submission." };
+  }
+
+  const result = applied.state;
+  if (!endTurnIndexes.length && !result.winner) {
+    return { ok: false, state: original, error: "A non-winning submission must end with end_turn." };
+  }
+  if (!result.winner) {
+    if (result.currentPlayer === submittingPlayer || result.turnNumber !== canonical.turnNumber + 1) {
+      return { ok: false, state: original, error: "Turn submission did not pass exactly one turn to the opponent." };
+    }
+  } else if (result.turnNumber !== canonical.turnNumber) {
+    return { ok: false, state: original, error: "A winning submission may not advance additional turns." };
+  }
+
+  return { ok: true, state: result, actions };
+}
+
 function freshUnit(id: string, owner: PlayerId, kind: UnitKind, x: number, y: number): UnitState {
   return {
     id,
@@ -560,6 +658,5 @@ export function getRecruitOptions(state: MatchState): Array<{ kind: UnitKind; af
     affordable: state.players[state.currentPlayer].gold >= unitDefinitions[kind].cost
   }));
 }
-
 
 
