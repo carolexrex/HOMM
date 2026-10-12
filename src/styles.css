@@ -401,6 +401,17 @@ button:disabled { opacity: 0.45; }
   border: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(10, 20, 24, 0.86);
 }
+.play-online-status {
+  position: absolute;
+  top: 0.8rem;
+  left: 0.8rem;
+  max-width: calc(100% - 1.6rem);
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(10, 20, 24, 0.86);
+  font-size: 0.82rem;
+}
 .play-drawer {
   position: absolute;
   top: 4.9rem;

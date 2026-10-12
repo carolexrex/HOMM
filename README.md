@@ -9,8 +9,10 @@ Bannerfront is a mobile-first fantasy tactics PWA built with React, TypeScript, 
 - Six mirrored maps: Meadow Line, Ashen Ford, Thornwatch, Sunken Road, Citadel Pass, and Lakewatch.
 - Terrain-driven play with roads, forests, hills, swamps, rivers, bridges, water, shorelines, villages, and keeps.
 - Supabase schema with Row Level Security policies and Edge Functions for guest profile, match create/join/list/resume, and server-side turn commits.
-- Local persistence for settings, account name, active match, online session, and local match stats.
-- Vitest coverage for engine, AI, map topology, and stability.
+- Versioned, idempotent online turn submissions: each turn carries the expected turn number and a client-generated submission ID, so stale turns are rejected and retries never apply twice. See [docs/online-turns.md](docs/online-turns.md).
+- Recoverable online drafts: unsent moves and pending submissions survive reloads and network failures and are reconciled with the server before play continues.
+- Local persistence for settings, account name, active match, online session, online drafts, and local match stats.
+- Vitest coverage for engine, AI, map topology, stability, the turn-submission handler, and online draft recovery, plus Docker-based SQL integration tests for the schema and the turn-commit function.
 
 ## Local Development
 
@@ -19,6 +21,7 @@ npm install
 npm run dev
 npm test
 npm run build
+npm run test:db   # SQL integration tests; requires Docker
 ```
 
 ## Environment
@@ -37,7 +40,7 @@ Use your Supabase project URL for both `VITE_SUPABASE_URL` and `SUPABASE_URL`. U
 
 ## Supabase Setup
 
-1. Run [supabase/schema.sql](supabase/schema.sql) in the Supabase SQL editor.
+1. Run [supabase/schema.sql](supabase/schema.sql) in the Supabase SQL editor. It is re-runnable and migrates existing installations in place. When upgrading, run it before deploying `match-turn`, then deploy the frontend (see [docs/online-turns.md](docs/online-turns.md#deployment-order)).
 2. Enable anonymous sign-ins in Supabase Auth.
 3. Deploy Edge Functions. Supabase provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to deployed functions; do not upload those names from `.env` with `supabase secrets set --env-file`.
 
@@ -53,7 +56,7 @@ Hot-seat and solo AI are stable locally. Async online is implemented and connect
 
 Known pre-release work:
 
-- Verify create, join, resume, submit turns, stale turn rejection, and match finish across two browsers/devices.
+- Verify create, join, resume, submit turns, stale turn rejection, retry/recovery, and match finish across two browsers/devices (checklist in [docs/online-turns.md](docs/online-turns.md#manual-two-browser-checklist)).
 - Choose and document the frontend host.
 - Optimize large PNG/MP3 assets for mobile load time.
 - Finalize deployment notes and release checklist.

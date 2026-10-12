@@ -3,6 +3,8 @@ import {
   applyOnlineTurnSubmission,
   createInviteCode,
   createMatch,
+  parseOnlineTurnActions,
+  sameTurnActions,
   type TurnAction
 } from "../src/engine";
 import { describe, expect, it } from "vitest";
@@ -90,5 +92,33 @@ describe("online invite codes", () => {
 
     expect(codes.every((code) => /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{10}$/.test(code))).toBe(true);
     expect(new Set(codes).size).toBe(codes.length);
+  });
+});
+
+describe("online turn versioning", () => {
+  it("rejects a turn planned for turn one once the match reaches turn three", () => {
+    const match = createMatch("meadow-line", "online");
+    const turnThree = applyOnlineTurnSubmission(
+      applyOnlineTurnSubmission(match, "sun", [{ type: "end_turn" }]).state,
+      "moon",
+      [{ type: "end_turn" }]
+    ).state;
+
+    // Control is back with sun, so without a version this would be accepted.
+    expect(turnThree.currentPlayer).toBe("sun");
+    const result = applyOnlineTurnSubmission(turnThree, "sun", [{ type: "end_turn" }], 1);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("stale");
+    expect(result.state.turnNumber).toBe(3);
+  });
+
+  it("normalizes actions so equal content compares equal regardless of key order", () => {
+    expect(sameTurnActions(
+      [{ to: { y: 2, x: 1 }, unitId: "a", type: "move" }, { type: "end_turn" }],
+      [{ type: "move", unitId: "a", to: { x: 1, y: 2 } }, { type: "end_turn", extra: true }]
+    )).toBe(true);
+    expect(sameTurnActions([{ type: "end_turn" }], [{ type: "recruit", kind: "militia" }, { type: "end_turn" }])).toBe(false);
+    expect(parseOnlineTurnActions([{ type: "nope" }]).ok).toBe(false);
   });
 });

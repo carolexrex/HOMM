@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   availableHeals,
   availableTargets,
@@ -26,14 +26,29 @@ import mainMenuMusicUrl from "../assets/music/mainmenu.mp3";
 import bannerfrontLogoUrl from "../assets/icons/bannerfront_main.png";
 import bannerfrontEmblemUrl from "../assets/icons/bannerfront_emblem.png";
 import { createOnlineApi } from "../lib/online";
-import { clearActiveMatch, clearOnlineSession, loadAccount, loadActiveMatch, loadLocalStats, loadOnlineSession, loadSettings, recordLocalMatch, saveAccount, saveActiveMatch, saveOnlineSession, saveSettings, type LocalStats, type OnlineSession } from "../lib/storage";
+import { draftBoard } from "../lib/onlineDraft";
+import { createBrowserLockRunner, createOnlineDraftStore } from "../lib/onlineDraftStore";
+import { clearActiveMatch, clearOnlineSession, loadAccount, loadActiveMatch, loadLocalStats, loadOnlineDraft, loadOnlineSession, loadSettings, recordLocalMatch, saveAccount, saveActiveMatch, saveOnlineSession, saveSettings, type LocalStats } from "../lib/storage";
 import { LaunchScreen } from "./LaunchScreen";
 import { getLocalLeaderboard, getLocalStatsSummary } from "./localStats";
+import { OnlineMatchController, type OnlineSync } from "./onlineMatchController";
 import { PlayScreen } from "./PlayScreen";
+
+function loadInitialPlayState(onlineConfigured: boolean) {
+  const session = loadOnlineSession();
+  const saved = loadActiveMatch();
+  const isOnline = saved?.mode === "online";
+  const draft = isOnline && session ? loadOnlineDraft(session.matchId, session.side) : null;
+  // Rebuild the board from the draft rather than trusting a separately saved snapshot.
+  const match = draft ? draftBoard(draft) ?? draft.baseState : saved;
+  const sync: OnlineSync = !isOnline ? "ready" : session && onlineConfigured ? "checking" : "unreachable";
+  return { match, session, draft, sync };
+}
 
 export function App() {
   const onlineApi = useMemo(() => createOnlineApi(), []);
-  const [match, setMatch] = useState<MatchState | null>(() => loadActiveMatch());
+  const [initialPlay] = useState(() => loadInitialPlayState(onlineApi.configured));
+  const [match, setMatch] = useState<MatchState | null>(initialPlay.match);
   const [mapId, setMapId] = useState(() => maps[0].id);
   const [mode, setMode] = useState<MatchMode>("hotseat");
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
@@ -50,7 +65,6 @@ export function App() {
   const [aiDifficulty, setAiDifficulty] = useState<AiDifficultyLevel>(() => loadSettings()?.aiDifficulty ?? "normal");
   const [economyMode, setEconomyMode] = useState<EconomyMode>(() => loadSettings()?.economyMode ?? "standard");
   const [localStats, setLocalStats] = useState<LocalStats>(() => loadLocalStats());
-  const [onlineSession, setOnlineSession] = useState<OnlineSession | null>(() => loadOnlineSession());
   const [onlineInviteCode, setOnlineInviteCode] = useState("");
   const [onlineMatches, setOnlineMatches] = useState<Array<{ id: string; mapId: string; inviteCode: string | null; currentPlayer: string; turnNumber: number; winner: string | null; updatedAt: string; side: "sun" | "moon" | null; state: MatchState }>>([]);
   const [onlineBusy, setOnlineBusy] = useState(false);
@@ -59,7 +73,27 @@ export function App() {
   const menuMusicRef = useRef<HTMLAudioElement | null>(null);
   const playBoardRef = useRef<HTMLElement | null>(null);
   const selectedPanelRef = useRef<HTMLDivElement | null>(null);
-  const pendingOnlineActionsRef = useRef<TurnAction[]>([]);
+  // Online sync, drafts, and cross-tab coordination live in the controller; React renders its view.
+  const [onlineController] = useState(() => new OnlineMatchController(
+    {
+      api: {
+        async getMatch(matchId) {
+          const account = await ensureOnlineAccount();
+          return onlineApi.getMatch(matchId, account.guestName);
+        },
+        async submitTurn(submission) {
+          const account = await ensureOnlineAccount();
+          return onlineApi.submitTurn(submission, account.guestName);
+        }
+      },
+      drafts: createOnlineDraftStore(createBrowserLockRunner()),
+      getUserId: () => loadAccount()?.userId ?? null,
+      ui: { setBoard: setMatch, setMessage, setBusy, clearSelection: () => setSelectedUnitId(null) }
+    },
+    initialPlay
+  ));
+  const onlineView = useSyncExternalStore(onlineController.subscribe, onlineController.getView);
+  const { session: onlineSession, draft: onlineDraft, sync: onlineSync } = onlineView;
 
   useEffect(() => {
     const existing = loadAccount();
@@ -85,28 +119,25 @@ export function App() {
   }, [mode, match]);
 
   useEffect(() => {
-    if (!match || match.mode !== "online" || !onlineSession || !onlineApi.configured) {
+    if (initialPlay.match?.mode !== "online") {
       return;
     }
-    const account = loadAccount() ?? { guestName: "Guest Banner" };
-    void onlineApi.getMatch(onlineSession.matchId, account.guestName)
-      .then((latest) => {
-        setMatch(latest.state);
-        setOnlineSession((current) => {
-          if (
-            current?.matchId === latest.id &&
-            current.side === latest.side &&
-            current.inviteCode === latest.inviteCode
-          ) {
-            return current;
-          }
-          return { matchId: latest.id, side: latest.side, inviteCode: latest.inviteCode };
-        });
-      })
-      .catch(() => {
-        /* ignore passive refresh failures on load */
-      });
-  }, [match?.id, match?.mode, onlineSession?.matchId, onlineApi.configured]);
+    if (!initialPlay.session || !onlineApi.configured) {
+      setMessage(onlineApi.configured ? "Online session details are missing. Leave and resume the match." : "Supabase env vars are missing, so this online match cannot sync.");
+      return;
+    }
+    void onlineController.refresh(initialPlay.session.matchId);
+  }, []);
+
+  useEffect(() => {
+    // Follow drafts written by other tabs. Writes are protected by locked compare-and-set,
+    // so this only keeps the board current; correctness does not depend on it.
+    const onStorage = (event: StorageEvent) => {
+      void onlineController.handleStorageChange(event.key);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [onlineController]);
 
   useEffect(() => {
     if (match) {
@@ -235,7 +266,8 @@ export function App() {
   const reachable = match && selectedUnit && !selectedUnit.moved ? reachableTiles(match, selectedUnit.id) : [];
   const attackableIds = match && selectedUnit && !selectedUnit.acted ? availableTargets(match, selectedUnit.id).map((unit) => unit.id) : [];
   const healableIds = match && selectedUnit && !selectedUnit.acted ? availableHeals(match, selectedUnit.id).map((unit) => unit.id) : [];
-  const isOnlineLocalTurn = Boolean(match && match.mode === "online" && onlineSession && onlineSession.side === match.currentPlayer);
+  const isOnlineLocalTurn = Boolean(match?.mode === "online" && onlineView.canPlay);
+  const onlineStatus = match?.mode === "online" ? describeOnlineStatus() : null;
   const combatPreviews = useMemo(() => {
     if (!match || !selectedUnit || selectedUnit.acted) {
       return {};
@@ -354,11 +386,9 @@ export function App() {
     try {
       const account = await ensureOnlineAccount();
       const joined = await onlineApi.joinMatch(inviteCode, account.guestName);
-      setOnlineSession({ matchId: joined.id, side: joined.side, inviteCode: joined.inviteCode });
-      pendingOnlineActionsRef.current = [];
-      setMatch(joined.state);
-      setMode("online");
       setMessage(`Joined match ${joined.inviteCode ?? inviteCode} as ${joined.side}.`);
+      setMode("online");
+      await onlineController.open(joined);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not join that match.");
     } finally {
@@ -375,10 +405,8 @@ export function App() {
     try {
       const account = await ensureOnlineAccount();
       const latest = await onlineApi.getMatch(matchId, account.guestName);
-      setOnlineSession({ matchId: latest.id, side: latest.side, inviteCode: latest.inviteCode });
-      pendingOnlineActionsRef.current = [];
-      setMatch(latest.state);
       setMessage(null);
+      await onlineController.open(latest);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not resume that match.");
     } finally {
@@ -390,19 +418,23 @@ export function App() {
     if (!match || match.mode !== "online" || !onlineSession || !onlineApi.configured) {
       return;
     }
-    setBusy(true);
-    try {
-      const account = await ensureOnlineAccount();
-      const latest = await onlineApi.getMatch(onlineSession.matchId, account.guestName);
-      pendingOnlineActionsRef.current = [];
-      setMatch(latest.state);
-      setOnlineSession({ matchId: latest.id, side: latest.side, inviteCode: latest.inviteCode });
-      setMessage(`Refreshed ${latest.side === latest.state.currentPlayer ? "your turn" : "waiting for opponent"}.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not refresh the online match.");
-    } finally {
-      setBusy(false);
+    await onlineController.refresh(onlineSession.matchId, true);
+  }
+
+  function describeOnlineStatus(): string | null {
+    const draftMoves = onlineDraft?.actions.length ?? 0;
+    if (onlineSync === "checking") {
+      return onlineDraft?.status === "submitting" ? "Sending turn..." : "Syncing with server...";
     }
+    // A frozen turn adopted from another tab can be pending while this tab is otherwise synced.
+    if (onlineDraft?.status === "submitting") return "Turn pending, not confirmed";
+    if (onlineSync === "unreachable") {
+      return draftMoves ? `Offline, ${draftMoves} unsent move(s) saved` : "Offline, not synced";
+    }
+    if (draftMoves) {
+      return `${draftMoves} unsent move(s), sent at End Turn`;
+    }
+    return null;
   }
 
   async function startMatch(nextMode: MatchMode) {
@@ -423,9 +455,7 @@ export function App() {
         setBusy(true);
         const account = await ensureOnlineAccount();
         const created = await onlineApi.createMatch(mapId, { economyMode }, account.guestName);
-        setOnlineSession({ matchId: created.id, side: created.side, inviteCode: created.inviteCode });
-        pendingOnlineActionsRef.current = [];
-        setMatch(created.state);
+        await onlineController.open(created);
         setMessage(created.inviteCode ? `Online match created. Invite code: ${created.inviteCode}` : "Online match created.");
       } catch (error) {
         setMessage(error instanceof Error ? error.message : "Online match creation failed.");
@@ -435,9 +465,8 @@ export function App() {
       return;
     }
 
+    onlineController.leave();
     setMatch(nextMatch);
-    setOnlineSession(null);
-    pendingOnlineActionsRef.current = [];
   }
 
   function applyResult(next: ReturnType<typeof moveUnit>, keepSelection = false) {
@@ -452,48 +481,36 @@ export function App() {
     setMessage(next.issue?.message ?? "That action failed.");
   }
 
-  function queueOnlineAction(action: TurnAction): TurnAction[] {
-    const actions = [...pendingOnlineActionsRef.current, action];
-    pendingOnlineActionsRef.current = actions;
-    return actions;
+  function onlineBlockedMessage(fallback: string): string {
+    if (onlineSync === "checking") return "Syncing with the server. Wait a moment.";
+    if (onlineSync === "unreachable") {
+      return onlineDraft?.status === "submitting"
+        ? "Your turn is still pending. Tap Retry to confirm it with the server."
+        : "This board is not synced with the server. Tap Refresh first.";
+    }
+    if (onlineDraft?.status === "submitting") return "Your turn is pending. Tap Retry to confirm it with the server.";
+    return fallback;
   }
 
-  async function submitOnlineActions(actions: TurnAction[]) {
-    if (!onlineSession) {
-      setMessage("Online session details are missing. Refresh the match and try again.");
-      return;
-    }
-
-    setBusy(true);
-    setSelectedUnitId(null);
-    try {
-      const account = await ensureOnlineAccount();
-      const committed = await onlineApi.submitTurn(onlineSession.matchId, actions, account.guestName);
-      pendingOnlineActionsRef.current = [];
-      setMatch(committed.state);
-      setMessage(committed.winner ? `${committed.state.players[committed.winner as "sun" | "moon"].name} won.` : "Turn submitted. Waiting for opponent.");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Online turn submission failed.");
-      const account = loadAccount() ?? { guestName: "Guest Banner" };
-      const latest = await onlineApi.getMatch(onlineSession.matchId, account.guestName).catch(() => null);
-      pendingOnlineActionsRef.current = [];
-      if (latest) {
-        setMatch(latest.state);
-      }
-    } finally {
-      setBusy(false);
-    }
+  /**
+   * Records a locally validated online action; the controller applies the engine result only
+   * if the action was stored and the board it was computed from is still current. Otherwise
+   * (another tab changed the draft, a refresh moved the board on, or the match was left) the
+   * result is dropped and the controller explains why.
+   */
+  function playOnlineAction(action: TurnAction, apply: () => void) {
+    void onlineController.recordAction(action, apply);
   }
 
   function handleTileTap(coord: { x: number; y: number }) {
-    if (!match || busy) {
+    if (!match || busy || onlineController.isWriting) {
       return;
     }
     if (match.winner) {
       return;
     }
     if (match.mode === "online" && !isOnlineLocalTurn) {
-      setMessage("Wait for your turn, then refresh when your opponent finishes.");
+      setMessage(onlineBlockedMessage("Wait for your turn, then refresh when your opponent finishes."));
       return;
     }
 
@@ -514,7 +531,8 @@ export function App() {
     if (occupant && selectedUnit.kind === "healer" && healableIds.includes(occupant.id)) {
       const result = healUnit(match, selectedUnit.id, occupant.id);
       if (result.ok && match.mode === "online") {
-        queueOnlineAction({ type: "heal", healerId: selectedUnit.id, targetId: occupant.id });
+        playOnlineAction({ type: "heal", healerId: selectedUnit.id, targetId: occupant.id }, () => applyResult(result));
+        return;
       }
       applyResult(result);
       return;
@@ -533,43 +551,54 @@ export function App() {
       }
       const result = attackUnit(match, selectedUnit.id, occupant.id);
       if (result.ok && match.mode === "online") {
-        const actions = queueOnlineAction({ type: "attack", attackerId: selectedUnit.id, targetId: occupant.id });
+        const attack: TurnAction = { type: "attack", attackerId: selectedUnit.id, targetId: occupant.id };
         if (result.state.winner) {
-          void submitOnlineActions(actions);
+          // A terminal win is committed without end_turn; the board stays pre-attack until confirmed.
+          void onlineController.submit(attack);
           return;
         }
+        playOnlineAction(attack, () => applyResult(result));
+        return;
       }
       applyResult(result);
       return;
     }
 
     const result = moveUnit(match, selectedUnit.id, coord);
+    const applyMove = () => {
+      applyResult(result, result.ok);
+      if (result.ok) {
+        setSelectedUnitId(selectedUnit.id);
+      }
+    };
     if (result.ok && match.mode === "online") {
-      queueOnlineAction({ type: "move", unitId: selectedUnit.id, to: coord });
+      playOnlineAction({ type: "move", unitId: selectedUnit.id, to: coord }, applyMove);
+      return;
     }
-    applyResult(result, result.ok);
-    if (result.ok) {
-      setSelectedUnitId(selectedUnit.id);
-    }
+    applyMove();
   }
 
   function handleRecruit(kind: UnitKind) {
-    if (match && !busy) {
+    if (match && !busy && !onlineController.isWriting) {
       if (match.mode === "online" && !isOnlineLocalTurn) {
-        setMessage("Wait for your turn before recruiting.");
+        setMessage(onlineBlockedMessage("Wait for your turn before recruiting."));
         return;
       }
       const result = recruitUnit(match, kind);
+      const applyRecruit = () => {
+        applyResult(result);
+        setShowRecruit(false);
+      };
       if (result.ok && match.mode === "online") {
-        queueOnlineAction({ type: "recruit", kind });
+        playOnlineAction({ type: "recruit", kind }, applyRecruit);
+        return;
       }
-      applyResult(result);
-      setShowRecruit(false);
+      applyRecruit();
     }
   }
 
   async function handleEndTurn() {
-    if (!match || busy) {
+    if (!match || busy || onlineController.isWriting) {
       return;
     }
 
@@ -579,7 +608,7 @@ export function App() {
     }
 
     if (!isOnlineLocalTurn || !onlineSession) {
-      setMessage("It is not your turn.");
+      setMessage(onlineBlockedMessage("It is not your turn."));
       return;
     }
 
@@ -589,17 +618,16 @@ export function App() {
       return;
     }
 
-    const actions = [...pendingOnlineActionsRef.current, { type: "end_turn" } as TurnAction];
-
-    await submitOnlineActions(actions);
+    await onlineController.submit({ type: "end_turn" });
   }
 
   function leaveMatch() {
     aiTurnRef.current = false;
     clearActiveMatch();
     clearOnlineSession();
-    pendingOnlineActionsRef.current = [];
-    setOnlineSession(null);
+    // Any online draft stays stored for this match and is reconciled on resume.
+    onlineController.leave();
+    setBusy(false);
     setMatch(null);
     setSelectedUnitId(null);
     setMessage(null);
@@ -648,6 +676,9 @@ export function App() {
           economyMode={economyMode}
           busy={busy}
           message={message}
+          onlineStatus={onlineStatus}
+          onlineRefreshLabel={onlineDraft?.status === "submitting" ? "Retry" : "Refresh"}
+          canDiscardOnlineDraft={Boolean(onlineDraft?.status === "editing" && onlineDraft.actions.length && onlineSync === "ready" && !busy)}
           moveAnimation={moveAnimation}
           setMoveAnimation={setMoveAnimation}
           showRecruit={showRecruit}
@@ -668,6 +699,7 @@ export function App() {
           onRecruit={handleRecruit}
           onEndTurn={() => void handleEndTurn()}
           onRefreshOnlineMatch={() => void refreshActiveOnlineMatch()}
+          onDiscardOnlineDraft={() => void onlineController.discard()}
           onClearSelection={() => setSelectedUnitId(null)}
           onRestartMatch={restartMatch}
           onLeaveMatch={leaveMatch}

@@ -34,6 +34,10 @@ interface PlayScreenProps {
   economyMode: EconomyMode;
   busy: boolean;
   message: string | null;
+  /** Online draft/sync status; null when there is nothing to report. */
+  onlineStatus: string | null;
+  onlineRefreshLabel: string;
+  canDiscardOnlineDraft: boolean;
   moveAnimation: "animated" | "instant";
   setMoveAnimation: Dispatch<SetStateAction<"animated" | "instant">>;
   showRecruit: boolean;
@@ -54,6 +58,7 @@ interface PlayScreenProps {
   onRecruit(kind: UnitKind): void;
   onEndTurn(): void;
   onRefreshOnlineMatch(): void;
+  onDiscardOnlineDraft(): void;
   onClearSelection(): void;
   onRestartMatch(): void;
   onLeaveMatch(): void;
@@ -70,6 +75,9 @@ export function PlayScreen({
   economyMode,
   busy,
   message,
+  onlineStatus,
+  onlineRefreshLabel,
+  canDiscardOnlineDraft,
   moveAnimation,
   setMoveAnimation,
   showRecruit,
@@ -90,6 +98,7 @@ export function PlayScreen({
   onRecruit,
   onEndTurn,
   onRefreshOnlineMatch,
+  onDiscardOnlineDraft,
   onClearSelection,
   onRestartMatch,
   onLeaveMatch
@@ -167,6 +176,10 @@ export function PlayScreen({
             </div>
           ) : null}
 
+          {onlineStatus && !showGuide ? (
+            <div className="play-online-status" role="status">{onlineStatus}</div>
+          ) : null}
+
           {message && !showGuide ? (
             <div className={`play-message ${message.includes("cannot") || message.includes("not") ? "danger" : ""}`}>
               {message}
@@ -218,6 +231,9 @@ export function PlayScreen({
                 <button className="chip-button" type="button" onClick={() => setMoveAnimation((current) => current === "animated" ? "instant" : "animated")}>Move: {moveAnimation === "animated" ? "Animated" : "Instant"}</button>
                 <button className="chip-button" type="button" onClick={() => { setShowMenu(false); setShowLog((open) => !open); }}>{showLog ? "Hide Log" : "Show Log"}</button>
                 <button className="chip-button" type="button" onClick={() => { setShowMenu(false); setShowGuide((open) => !open); }}>{showGuide ? "Hide Guide" : "How To Play"}</button>
+                {canDiscardOnlineDraft ? (
+                  <button className="chip-button" type="button" onClick={() => { setShowMenu(false); onDiscardOnlineDraft(); }}>Undo Turn</button>
+                ) : null}
                 <button className="chip-button" type="button" onClick={onLeaveMatch}>Exit Match</button>
               </div>
             </aside>
@@ -336,7 +352,7 @@ export function PlayScreen({
         ) : null}
         {match.mode === "online" ? (
           <button type="button" onClick={onRefreshOnlineMatch} disabled={busy}>
-            Refresh
+            {onlineRefreshLabel}
           </button>
         ) : null}
         <button type="button" onClick={onClearSelection} disabled={!selectedUnit || busy}>

@@ -40,9 +40,11 @@ function fail(state: MatchState, code: GameIssueCode, message: string): GameResu
 
 export const MAX_ONLINE_TURN_ACTIONS = 128;
 
+export type OnlineTurnRejectionCode = "finished" | "not_your_turn" | "stale" | "rejected";
+
 export type OnlineTurnSubmissionResult =
   | { ok: true; state: MatchState; actions: TurnAction[] }
-  | { ok: false; state: MatchState; error: string };
+  | { ok: false; state: MatchState; error: string; code: OnlineTurnRejectionCode };
 
 function isShortId(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 128;
@@ -83,54 +85,87 @@ function parseTurnAction(value: unknown): TurnAction | null {
   }
 }
 
-export function applyOnlineTurnSubmission(
-  canonical: MatchState,
-  submittingPlayer: PlayerId,
-  input: unknown
-): OnlineTurnSubmissionResult {
-  const original = cloneState(canonical);
-  if (canonical.winner) {
-    return { ok: false, state: original, error: "The match is already finished." };
-  }
-  if (canonical.currentPlayer !== submittingPlayer) {
-    return { ok: false, state: original, error: "It is not your turn." };
-  }
+/**
+ * Validates and normalizes untrusted turn actions. The normalized form has a fixed key
+ * order, so two submissions carry the same content exactly when their JSON matches.
+ */
+export function parseOnlineTurnActions(input: unknown): { ok: true; actions: TurnAction[] } | { ok: false; error: string } {
   if (!Array.isArray(input) || input.length === 0) {
-    return { ok: false, state: original, error: "Actions are required." };
+    return { ok: false, error: "Actions are required." };
   }
   if (input.length > MAX_ONLINE_TURN_ACTIONS) {
-    return { ok: false, state: original, error: `A turn may contain at most ${MAX_ONLINE_TURN_ACTIONS} actions.` };
+    return { ok: false, error: `A turn may contain at most ${MAX_ONLINE_TURN_ACTIONS} actions.` };
   }
 
   const actions: TurnAction[] = [];
   for (const value of input) {
     const action = parseTurnAction(value);
     if (!action) {
-      return { ok: false, state: original, error: "Turn submission contains a malformed action." };
+      return { ok: false, error: "Turn submission contains a malformed action." };
     }
     actions.push(action);
   }
+  return { ok: true, actions };
+}
+
+export function sameTurnActions(left: unknown, right: unknown): boolean {
+  const a = parseOnlineTurnActions(left);
+  const b = parseOnlineTurnActions(right);
+  return a.ok && b.ok && JSON.stringify(a.actions) === JSON.stringify(b.actions);
+}
+
+/**
+ * Replays one submitted turn against the canonical state. `expectedTurnNumber` is the
+ * canonical turn the client's draft started from; a mismatch means the draft is stale.
+ */
+export function applyOnlineTurnSubmission(
+  canonical: MatchState,
+  submittingPlayer: PlayerId,
+  input: unknown,
+  expectedTurnNumber: number = canonical.turnNumber
+): OnlineTurnSubmissionResult {
+  const original = cloneState(canonical);
+  if (canonical.winner) {
+    return { ok: false, state: original, code: "finished", error: "The match is already finished." };
+  }
+  if (canonical.turnNumber !== expectedTurnNumber) {
+    return {
+      ok: false,
+      state: original,
+      code: "stale",
+      error: `This turn was planned for turn ${expectedTurnNumber}, but the match is on turn ${canonical.turnNumber}.`
+    };
+  }
+  if (canonical.currentPlayer !== submittingPlayer) {
+    return { ok: false, state: original, code: "not_your_turn", error: "It is not your turn." };
+  }
+
+  const parsed = parseOnlineTurnActions(input);
+  if (!parsed.ok) {
+    return { ok: false, state: original, code: "rejected", error: parsed.error };
+  }
+  const { actions } = parsed;
 
   const endTurnIndexes = actions.flatMap((action, index) => action.type === "end_turn" ? [index] : []);
   if (endTurnIndexes.length > 1 || (endTurnIndexes.length === 1 && endTurnIndexes[0] !== actions.length - 1)) {
-    return { ok: false, state: original, error: "A submitted turn may contain one end_turn action, and it must be last." };
+    return { ok: false, state: original, code: "rejected", error: "A submitted turn may contain one end_turn action, and it must be last." };
   }
 
   const applied = applyTurnActions(canonical, actions);
   if (!applied.ok) {
-    return { ok: false, state: original, error: applied.issue?.message ?? "Illegal turn submission." };
+    return { ok: false, state: original, code: "rejected", error: applied.issue?.message ?? "Illegal turn submission." };
   }
 
   const result = applied.state;
   if (!endTurnIndexes.length && !result.winner) {
-    return { ok: false, state: original, error: "A non-winning submission must end with end_turn." };
+    return { ok: false, state: original, code: "rejected", error: "A non-winning submission must end with end_turn." };
   }
   if (!result.winner) {
     if (result.currentPlayer === submittingPlayer || result.turnNumber !== canonical.turnNumber + 1) {
-      return { ok: false, state: original, error: "Turn submission did not pass exactly one turn to the opponent." };
+      return { ok: false, state: original, code: "rejected", error: "Turn submission did not pass exactly one turn to the opponent." };
     }
   } else if (result.turnNumber !== canonical.turnNumber) {
-    return { ok: false, state: original, error: "A winning submission may not advance additional turns." };
+    return { ok: false, state: original, code: "rejected", error: "A winning submission may not advance additional turns." };
   }
 
   return { ok: true, state: result, actions };

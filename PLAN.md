@@ -14,13 +14,13 @@ This plan reflects the current repo state as validated locally on April 19, 2026
 
 Must-have:
 - [ ] Replace the weakest guest/device-only assumptions with a more durable player identity model.
-- [ ] Add Supabase Row Level Security and match access policies.
+- [x] Add Supabase Row Level Security and match access policies.
 - [ ] Harden match create, join, resume, and turn submission flows.
-- [ ] Make turn submission clearly server-authoritative.
-- [ ] Add automated coverage for online flows, not just engine logic.
+- [x] Make turn submission clearly server-authoritative (versioned, idempotent commits via `commit_match_turn_v2`).
+- [ ] Add automated coverage for online flows, not just engine logic. Turn submission is covered by handler, draft-recovery, and SQL integration tests; create/join and two-device end-to-end flows are not automated yet.
 
 Nice-to-have:
-- [ ] Better recovery flow for stale sessions and duplicate submissions.
+- [x] Better recovery flow for stale sessions and duplicate submissions (persisted drafts, same-ID retries, reconciliation on load).
 - [ ] Cleaner player-facing copy for online errors and waiting states.
 
 Success criteria:

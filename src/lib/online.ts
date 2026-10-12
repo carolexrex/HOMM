@@ -11,7 +11,44 @@ export interface OnlineApi {
   joinMatch(inviteCode: string, guestName?: string): Promise<{ joined: true; id: string; inviteCode: string | null; side: "sun" | "moon"; state: MatchState }>;
   listMatches(guestName?: string): Promise<Array<{ id: string; mapId: string; inviteCode: string | null; currentPlayer: string; turnNumber: number; winner: string | null; updatedAt: string; side: "sun" | "moon" | null; state: MatchState }>>;
   getMatch(matchId: string, guestName?: string): Promise<{ id: string; mapId: string; inviteCode: string | null; currentPlayer: string; turnNumber: number; winner: string | null; updatedAt: string; side: "sun" | "moon"; state: MatchState }>;
-  submitTurn(matchId: string, actions: TurnAction[], guestName?: string): Promise<{ accepted: true; matchId: string; turnNumber: number; currentPlayer: string; winner: string | null; state: MatchState }>;
+  submitTurn(submission: TurnSubmission, guestName?: string): Promise<TurnSubmissionAccepted>;
+}
+
+export interface TurnSubmission {
+  matchId: string;
+  submissionId: string;
+  /** Canonical turn number the draft was planned from. */
+  expectedTurnNumber: number;
+  actions: TurnAction[];
+}
+
+export interface TurnSubmissionAccepted {
+  accepted: true;
+  /** "duplicate" means an earlier attempt with this submission ID was already committed. */
+  code: "accepted" | "duplicate";
+  matchId: string;
+  submissionId: string;
+  turnNumber: number;
+  currentPlayer: string;
+  winner: string | null;
+  /** Current canonical state, which may already include later turns. */
+  state: MatchState;
+}
+
+/**
+ * An Edge Function failure. `status` is undefined when no HTTP response arrived (network,
+ * relay, or client error), in which case the server may or may not have acted.
+ */
+export class OnlineRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+    readonly code?: string,
+    readonly state?: MatchState
+  ) {
+    super(message);
+    this.name = "OnlineRequestError";
+  }
 }
 
 let cachedClient: SupabaseClient | null = null;
@@ -28,20 +65,22 @@ function getClient(): SupabaseClient | null {
 
 async function throwFunctionError(error: unknown): Promise<never> {
   if (error instanceof FunctionsHttpError && error.context instanceof Response) {
-    let message: string | null = null;
+    const status = error.context.status;
+    let payload: { error?: unknown; code?: unknown; state?: unknown } | null = null;
     try {
-      const payload = await error.context.clone().json();
-      if (typeof payload?.error === "string" && payload.error.trim()) {
-        message = payload.error;
-      }
+      payload = await error.context.clone().json();
     } catch {
-      /* fall back to the Supabase error object below */
+      /* fall back to the Supabase error message below */
     }
-    if (message) {
-      throw new Error(message);
-    }
+    const message = typeof payload?.error === "string" && payload.error.trim() ? payload.error : error.message;
+    throw new OnlineRequestError(
+      message,
+      status,
+      typeof payload?.code === "string" ? payload.code : undefined,
+      payload?.state && typeof payload.state === "object" ? payload.state as MatchState : undefined
+    );
   }
-  throw error;
+  throw new OnlineRequestError(error instanceof Error ? error.message : "Online request failed.");
 }
 
 export function createOnlineApi(): OnlineApi {
@@ -136,18 +175,23 @@ export function createOnlineApi(): OnlineApi {
       }
       return data as { id: string; mapId: string; inviteCode: string | null; currentPlayer: string; turnNumber: number; winner: string | null; updatedAt: string; side: "sun" | "moon"; state: MatchState };
     },
-    async submitTurn(matchId: string, actions: TurnAction[], guestName?: string) {
+    async submitTurn(submission: TurnSubmission, guestName?: string) {
       if (!client) {
         throw new Error("Supabase is not configured.");
       }
-      await ensurePlayerSession(guestName);
+      try {
+        await ensurePlayerSession(guestName);
+      } catch (error) {
+        // The turn was never sent; report it without a status so the draft is kept for retry.
+        throw new OnlineRequestError(error instanceof Error ? error.message : "Could not reach the server.");
+      }
       const { data, error } = await client.functions.invoke("match-turn", {
-        body: { guestName, matchId, actions }
+        body: { guestName, ...submission }
       });
       if (error) {
         await throwFunctionError(error);
       }
-      return data as { accepted: true; matchId: string; turnNumber: number; currentPlayer: string; winner: string | null; state: MatchState };
+      return data as TurnSubmissionAccepted;
     }
   };
 }

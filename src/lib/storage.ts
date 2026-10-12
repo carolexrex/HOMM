@@ -1,4 +1,5 @@
 import type { AiDifficultyLevel, EconomyMode, MatchState, PlayerId } from "../engine";
+import type { OnlineDraft } from "./onlineDraft";
 
 const activeMatchKey = "bannerfront.active-match";
 const accountKey = "bannerfront.account";
@@ -154,4 +155,38 @@ export function saveOnlineSession(session: OnlineSession): void {
 
 export function clearOnlineSession(): void {
   localStorage.removeItem(onlineSessionKey);
+}
+
+const onlineDraftKeyPrefix = "bannerfront.online-draft:";
+
+/** One key per match and seat, so tabs on different matches never write the same entry. */
+export function onlineDraftKey(matchId: string, side: PlayerId): string {
+  return `${onlineDraftKeyPrefix}${matchId}:${side}`;
+}
+
+export function loadOnlineDraft(matchId: string, side: PlayerId): OnlineDraft | null {
+  const key = onlineDraftKey(matchId, side);
+  const raw = localStorage.getItem(key);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const draft = JSON.parse(raw) as OnlineDraft;
+    return draft && draft.matchId === matchId && draft.side === side && Array.isArray(draft.actions) && draft.baseState ? draft : null;
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
+}
+
+/**
+ * Raw writes. Callers coordinate through src/lib/onlineDraftStore.ts, which runs every
+ * read-compare-write under a cross-tab lock; do not call these directly from the UI.
+ */
+export function saveOnlineDraft(draft: OnlineDraft): void {
+  localStorage.setItem(onlineDraftKey(draft.matchId, draft.side), JSON.stringify(draft));
+}
+
+export function removeOnlineDraft(matchId: string, side: PlayerId): void {
+  localStorage.removeItem(onlineDraftKey(matchId, side));
 }
