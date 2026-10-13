@@ -1,5 +1,6 @@
 import { createClient, FunctionsHttpError, type SupabaseClient } from "@supabase/supabase-js";
 import type { EconomyMode, MatchState, TurnAction } from "../engine";
+import { createBrowserLockRunner } from "./onlineDraftStore";
 
 const url = import.meta.env.VITE_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -53,6 +54,10 @@ export class OnlineRequestError extends Error {
 
 let cachedClient: SupabaseClient | null = null;
 
+/** Held while checking for a session and, if there is none, signing in. Shared by every tab. */
+export const SIGN_IN_LOCK = "bannerfront.sign-in";
+const signInLock = createBrowserLockRunner();
+
 function getClient(): SupabaseClient | null {
   if (!url || !anonKey) {
     return null;
@@ -91,25 +96,30 @@ export function createOnlineApi(): OnlineApi {
       throw new Error("Supabase is not configured.");
     }
 
-    const { data: sessionData, error: sessionError } = await client.auth.getSession();
-    if (sessionError) {
-      throw sessionError;
-    }
-
-    if (!sessionData.session) {
-      const { error } = await client.auth.signInAnonymously(
-        guestName
-          ? {
-              options: {
-                data: { display_name: guestName }
-              }
-            }
-          : undefined
-      );
-      if (error) {
-        throw error;
+    // Callers overlap (the lobby list and Create, for example). Two anonymous sign-ins would
+    // create two users, and whichever finished last would own the session, leaving the other's
+    // new match with no player. Under the lock, later callers find the first one's session.
+    await signInLock(SIGN_IN_LOCK, async () => {
+      const { data: sessionData, error: sessionError } = await client.auth.getSession();
+      if (sessionError) {
+        throw sessionError;
       }
-    }
+
+      if (!sessionData.session) {
+        const { error } = await client.auth.signInAnonymously(
+          guestName
+            ? {
+                options: {
+                  data: { display_name: guestName }
+                }
+              }
+            : undefined
+        );
+        if (error) {
+          throw error;
+        }
+      }
+    });
 
     const { data, error } = await client.functions.invoke("guest-session", {
       body: { guestName }

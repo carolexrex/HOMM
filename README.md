@@ -12,7 +12,7 @@ Bannerfront is a mobile-first fantasy tactics PWA built with React, TypeScript, 
 - Versioned, idempotent online turn submissions: each turn carries the expected turn number and a client-generated submission ID, so stale turns are rejected and retries never apply twice. See [docs/online-turns.md](docs/online-turns.md).
 - Recoverable online drafts: unsent moves and pending submissions survive reloads and network failures and are reconciled with the server before play continues.
 - Local persistence for settings, account name, active match, online session, online drafts, and local match stats.
-- Vitest coverage for engine, AI, map topology, stability, the turn-submission handler, and online draft recovery, plus Docker-based SQL integration tests for the schema and the turn-commit function.
+- Vitest coverage for engine, AI, map topology, stability, the turn-submission handler, and online draft recovery, plus Docker-based SQL integration tests for the schema and the turn-commit function, and Playwright browser tests of two-player online play against a local Supabase stack.
 
 ## Local Development
 
@@ -22,7 +22,55 @@ npm run dev
 npm test
 npm run build
 npm run test:db   # SQL integration tests; requires Docker
+npm run test:e2e  # browser integration tests; requires Docker and the local Supabase stack (below)
 ```
+
+## Local Supabase Stack
+
+`supabase/config.toml` describes a local Supabase project (Postgres 17, Auth with anonymous
+sign-ins, and the Edge Functions in `supabase/functions`). Starting it applies
+`supabase/schema.sql` as the seed, so the local database matches the hosted schema.
+
+```bash
+npx supabase start    # first run pulls Docker images; prints the local URL and keys
+npx supabase status   # shows them again
+npx supabase db reset # re-applies schema.sql to an empty database
+npx supabase stop
+```
+
+The printed keys are the CLI's fixed local development keys; they only work against
+`127.0.0.1`. Do not copy hosted project keys into the repo.
+
+To play against the local stack (for example, two browser profiles on one machine), start the
+dev server with the local values in the environment rather than in a committed file:
+
+```bash
+eval "$(npx supabase status -o env | grep -E '^(API_URL|ANON_KEY)=')"
+VITE_SUPABASE_URL=$API_URL VITE_SUPABASE_ANON_KEY=$ANON_KEY npm run dev
+```
+
+## Browser Integration Tests
+
+`npm run test:e2e` type-checks `e2e/`, builds the app with the local stack's URL and anon key
+(into `dist-e2e/`), serves it with `vite preview` on port 4180, and runs Playwright (Chromium)
+against it. Nothing is mocked: players sign in anonymously through Supabase Auth, every request
+reaches the real Edge Functions, and access is enforced by the database's RLS policies. Each
+player is a separate browser context; tabs of one profile are pages in the same context.
+
+```bash
+npm install
+npx playwright install chromium   # once
+npx supabase start
+npm run test:e2e
+npx playwright test -g "lost"     # one scenario
+npx playwright show-trace test-results/e2e/<test>/trace.zip   # after a failure
+```
+
+The connection details are read from `npx supabase status` at run time, and the tests refuse to
+run against a non-local API. Concurrency and recovery scenarios hold `match-turn` (and auth or
+lobby) requests at explicit barriers (`e2e/support/turnGate.ts`) and release, commit, or drop
+them at exact points; there are no sleeps. Server state is inspected read-only with the local
+service role key. See [docs/online-turns.md](docs/online-turns.md#tests) for what is covered.
 
 ## Environment
 
@@ -52,11 +100,11 @@ npx supabase functions deploy match-turn
 
 ## MVP Status
 
-Hot-seat and solo AI are stable locally. Async online is implemented and connected to Supabase, but it still needs full two-device end-to-end testing before public MVP release.
+Hot-seat and solo AI are stable locally. Async online is implemented and connected to Supabase. Two-player create, join, resume, turn submission, recovery, and access control are verified by automated browser tests against a local Supabase stack (see [PLAN.md](PLAN.md)); real devices and a hosted deployment are not verified yet.
 
 Known pre-release work:
 
-- Verify create, join, resume, submit turns, stale turn rejection, retry/recovery, and match finish across two browsers/devices (checklist in [docs/online-turns.md](docs/online-turns.md#manual-two-browser-checklist)).
+- Run the remaining manual checks on real phones against a hosted project (checklist in [docs/online-turns.md](docs/online-turns.md#manual-two-browser-checklist)), including match finish, offline behavior, and PWA install/update.
 - Choose and document the frontend host.
 - Optimize large PNG/MP3 assets for mobile load time.
 - Finalize deployment notes and release checklist.

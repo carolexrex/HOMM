@@ -273,8 +273,37 @@ Refresh silently dropped queued moves. Refresh now keeps them.
   legacy-shaped install, re-applies it, and runs `tests/db/commit_match_turn.sql` and
   `tests/db/concurrency.sh` against the real SQL function, including real concurrent sessions.
   The stand-in for Supabase's `auth.uid()` and its roles is in `tests/db/bootstrap.sql`.
+- `npm run test:e2e` (requires Docker and `npx supabase start`; setup in the README) runs
+  `e2e/online.e2e.ts` in Chromium: the production build against the local Supabase stack, with
+  real anonymous auth, the Edge Functions under Deno, PostgREST, and RLS. Players are separate
+  browser contexts; same-profile tabs are pages of one context, so Web Locks and `storage`
+  events are the browser's own. `e2e/support/turnGate.ts` holds each `match-turn` request and
+  the test decides whether it reaches the server, whether the answer reaches the page, or both.
+  Covered:
+  - create, invite, join, lobby list, and resume; both players move and end turns, and each
+    board matches the server's `matches.state`;
+  - reload keeps unsent moves; Undo Turn restores the canonical board;
+  - a response lost after the commit: Retry resends the same ID, gets `duplicate`, and
+    `turns` has one row for it;
+  - two tabs of one profile: the other tab follows moves and the frozen turn, refuses to change
+    it, and after the sending tab closes (its request committed but unanswered) a reload and
+    Retry finish it with the same ID and one row;
+  - leaving for another match while a submission is in flight keeps the new board, draft, and
+    message; reopening the same match shares the in-flight request and confirms it once;
+  - a third player sees no listed match, cannot join a full match, gets 403 from `matches` and
+    `match-turn`, reads nothing through RLS, and cannot write `turns`, `matches`, or call
+    `commit_match_turn_v2`;
+  - regressions: a lobby list answering after Create keeps the invite code message, and Create
+    during the lobby's first anonymous sign-in waits for it (one sign-up, the match belongs to
+    the session's user) instead of signing in a second user.
+
+  Not covered: real phones and touch input, mobile Safari/Firefox, slow or flaky real networks,
+  PWA install/update and the service worker (blocked in these tests), and hosted Supabase.
 
 ## Manual Two-Browser Checklist
+
+Items 1-3, 5, 9, 10, and 11 are automated by `npm run test:e2e` on desktop Chromium against a local
+stack. Run the whole list on real phones against the hosted project before a playtest.
 
 Use two browser profiles (A = sun, B = moon) against a project with the new schema and function.
 

@@ -69,6 +69,8 @@ export function App() {
   const [onlineMatches, setOnlineMatches] = useState<Array<{ id: string; mapId: string; inviteCode: string | null; currentPlayer: string; turnNumber: number; winner: string | null; updatedAt: string; side: "sun" | "moon" | null; state: MatchState }>>([]);
   const [onlineBusy, setOnlineBusy] = useState(false);
   const aiTurnRef = useRef(false);
+  /** Bumped by every lobby list request and by leaving the lobby, so a late list answer stays quiet. */
+  const lobbyListRef = useRef(0);
   const recordedResultIdsRef = useRef(new Set<string>());
   const menuMusicRef = useRef<HTMLAudioElement | null>(null);
   const playBoardRef = useRef<HTMLElement | null>(null);
@@ -359,14 +361,16 @@ export function App() {
       setMessage("Supabase env vars are missing, so online creation is disabled in this workspace.");
       return;
     }
+    const request = ++lobbyListRef.current;
     setOnlineBusy(true);
     try {
       const account = await ensureOnlineAccount();
       const matches = await onlineApi.listMatches(account.guestName);
       setOnlineMatches(matches);
-      setMessage(null);
+      // A create, join, or resume that started meanwhile owns the message (an invite code, an error).
+      if (request === lobbyListRef.current) setMessage(null);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not load online matches.");
+      if (request === lobbyListRef.current) setMessage(error instanceof Error ? error.message : "Could not load online matches.");
     } finally {
       setOnlineBusy(false);
     }
@@ -382,6 +386,7 @@ export function App() {
       setMessage("Enter an invite code first.");
       return;
     }
+    lobbyListRef.current += 1;
     setOnlineBusy(true);
     try {
       const account = await ensureOnlineAccount();
@@ -401,6 +406,7 @@ export function App() {
       setMessage("Supabase env vars are missing, so online resume is disabled in this workspace.");
       return;
     }
+    lobbyListRef.current += 1;
     setOnlineBusy(true);
     try {
       const account = await ensureOnlineAccount();
@@ -438,6 +444,7 @@ export function App() {
   }
 
   async function startMatch(nextMode: MatchMode) {
+    lobbyListRef.current += 1;
     const nextMatch = createMatch(mapId, nextMode, aiDifficulty, { economyMode });
     setSelectedUnitId(null);
     setMessage(null);
