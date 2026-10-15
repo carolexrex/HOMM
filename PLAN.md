@@ -1,7 +1,7 @@
 # Bannerfront Plan
 
 This plan reflects the current repo state as validated locally on April 19, 2026. The online
-section was re-verified on October 13, 2026 with automated browser tests against a local
+section was re-verified on October 13-14, 2026 with automated browser tests against a local
 Supabase stack (see "Verification Status").
 
 ## Current Baseline
@@ -17,7 +17,7 @@ Supabase stack (see "Verification Status").
 Must-have:
 - [ ] Replace the weakest guest/device-only assumptions with a more durable player identity model.
 - [x] Add Supabase Row Level Security and match access policies.
-- [x] Harden match create, join, resume, and turn submission flows. Browser tests found and fixed two defects: a lobby list answering late erased the new match's invite code, and Create during the first anonymous sign-in could sign in a second user, leaving the new match with no player.
+- [x] Harden match create, join, resume, and turn submission flows. Browser tests found and fixed two defects: a lobby list answering late erased the new match's invite code, and Create during the first anonymous sign-in could sign in a second user, leaving the new match with no player. Playing matches to the end found two more: Refresh on a finished match said "waiting for opponent" instead of naming the winner, and leaving an online match after a reload went to the hot-seat launch screen instead of the online lobby.
 - [x] Make turn submission clearly server-authoritative (versioned, idempotent commits via `commit_match_turn_v2`).
 - [x] Add automated coverage for online flows, not just engine logic. `npm run test:e2e` drives two players through the rendered app against a local Supabase stack (real auth, Edge Functions, RLS).
 
@@ -30,7 +30,7 @@ Success criteria:
 - Illegal, stale, or duplicate turn submissions are rejected cleanly.
 - Match access is protected by database policy, not just client behavior.
 
-### Verification Status (October 13, 2026)
+### Verification Status (October 14, 2026)
 
 Verified automatically (`npm test`, `npm run test:db`, `npm run test:e2e`; desktop Chromium,
 local Supabase stack from `supabase/config.toml`):
@@ -41,13 +41,20 @@ local Supabase stack from `supabase/config.toml`):
 - [x] Same-profile tabs follow and preserve a frozen submission and recover it after the sending tab closes.
 - [x] Switching matches (or reopening the same one) during a submission keeps the right board and confirms once.
 - [x] A third player cannot list, join, read, or submit to another player's match (functions and RLS).
+- [x] Match finish: a Meadow Line match played to the end by both players through the board. The
+  winning attack commits without End Turn; the server records the winner and exactly one winning
+  row; both players see the victory after Refresh, a reload, and resuming from the lobby; a
+  retry of the winning submission (in the app after a lost response, and directly) is
+  `duplicate` with no new row; further submissions from either player are `finished` and direct
+  writes are refused, leaving the match unchanged.
 - [x] Turn commits under concurrency, legacy migration, and grants (`npm run test:db`).
 
 Still manual before a two-player playtest (checklist in `docs/online-turns.md`):
 - [ ] Deploy `schema.sql` and the three Edge Functions to the hosted project, enable anonymous sign-ins, and repeat create/join/turns there.
 - [ ] Two real phones on different networks: touch play, offline/online transitions, and Retry.
 - [ ] Mobile Safari and Firefox (only Chromium is automated).
-- [ ] Match finish (terminal win) end to end; it is covered by unit and SQL tests only.
+- [ ] Match finish on real phones and the hosted project, including a win by capturing the enemy
+  keep (only a win by defeating the last unit is automated).
 - [ ] PWA install and update on phones (the service worker is blocked in browser tests).
 - [ ] Choose a frontend host and serve the app from it (Phase 3).
 

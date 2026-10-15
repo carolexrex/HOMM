@@ -50,7 +50,8 @@ export function App() {
   const [initialPlay] = useState(() => loadInitialPlayState(onlineApi.configured));
   const [match, setMatch] = useState<MatchState | null>(initialPlay.match);
   const [mapId, setMapId] = useState(() => maps[0].id);
-  const [mode, setMode] = useState<MatchMode>("hotseat");
+  // A restored match keeps its mode, so leaving it returns to that mode (an online match to the lobby).
+  const [mode, setMode] = useState<MatchMode>(initialPlay.match?.mode ?? "hotseat");
   const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

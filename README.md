@@ -63,6 +63,7 @@ npx playwright install chromium   # once
 npx supabase start
 npm run test:e2e
 npx playwright test -g "lost"     # one scenario
+npx playwright test e2e/match-finish.e2e.ts   # two whole matches played to the end
 npx playwright show-trace test-results/e2e/<test>/trace.zip   # after a failure
 ```
 
@@ -70,7 +71,9 @@ The connection details are read from `npx supabase status` at run time, and the 
 run against a non-local API. Concurrency and recovery scenarios hold `match-turn` (and auth or
 lobby) requests at explicit barriers (`e2e/support/turnGate.ts`) and release, commit, or drop
 them at exact points; there are no sleeps. Server state is inspected read-only with the local
-service role key. See [docs/online-turns.md](docs/online-turns.md#tests) for what is covered.
+service role key. Matches played to the end are driven tap by tap; a read-only planner
+(`e2e/support/finisher.ts`) only chooses which legal action to tap, so the result is the same
+every run. See [docs/online-turns.md](docs/online-turns.md#tests) for what is covered.
 
 ## Environment
 

@@ -373,7 +373,12 @@ export class OnlineMatchController {
         return false;
       }
       if (announce && reconciliation.kind === "none") {
-        ui.setMessage(latest.side === latest.state.currentPlayer && !latest.state.winner ? "Refreshed: your turn." : "Refreshed: waiting for opponent.");
+        const { winner, players, currentPlayer } = latest.state;
+        ui.setMessage(
+          winner
+            ? `Refreshed: ${players[winner].name} won.`
+            : latest.side === currentPlayer ? "Refreshed: your turn." : "Refreshed: waiting for opponent."
+        );
       } else if (announce && reconciliation.kind === "resume") {
         ui.setMessage(`Refreshed: your ${reconciliation.draft.actions.length} unsent move(s) are kept until End Turn.`);
       }

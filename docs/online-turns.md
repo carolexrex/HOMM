@@ -274,7 +274,7 @@ Refresh silently dropped queued moves. Refresh now keeps them.
   `tests/db/concurrency.sh` against the real SQL function, including real concurrent sessions.
   The stand-in for Supabase's `auth.uid()` and its roles is in `tests/db/bootstrap.sql`.
 - `npm run test:e2e` (requires Docker and `npx supabase start`; setup in the README) runs
-  `e2e/online.e2e.ts` in Chromium: the production build against the local Supabase stack, with
+  `e2e/online.e2e.ts` and `e2e/match-finish.e2e.ts` in Chromium: the production build against the local Supabase stack, with
   real anonymous auth, the Edge Functions under Deno, PostgREST, and RLS. Players are separate
   browser contexts; same-profile tabs are pages of one context, so Web Locks and `storage`
   events are the browser's own. `e2e/support/turnGate.ts` holds each `match-turn` request and
@@ -293,17 +293,41 @@ Refresh silently dropped queued moves. Refresh now keeps them.
   - a third player sees no listed match, cannot join a full match, gets 403 from `matches` and
     `match-turn`, reads nothing through RLS, and cannot write `turns`, `matches`, or call
     `commit_match_turn_v2`;
-  - regressions: a lobby list answering after Create keeps the invite code message, and Create
+  - regressions: a lobby list answering after Create keeps the invite code message; Create
     during the lobby's first anonymous sign-in waits for it (one sign-up, the match belongs to
-    the session's user) instead of signing in a second user.
+    the session's user) instead of signing in a second user; and leaving an online match after
+    a reload returns to the online lobby, not the hot-seat launch screen;
+  - match finish (`e2e/match-finish.e2e.ts`): both players play a Meadow Line match to the end
+    by tapping the board, on their own turns, with End Turn after every non-winning turn. The
+    read-only `e2e/support/finisher.ts` chooses each legal action with the engine (attack, else
+    move into attack range, else close in), so the same game is played every run: Sun defeats
+    Moon's last unit on turn 11. Every turn row is checked as it is committed. Then:
+    - the winning attack is sent without End Turn (`actions` has no `end_turn`), held at the
+      barrier while the board stays pre-attack, and committed as `accepted`;
+    - `matches` has the winner on that turn, and exactly one `turns` row has a winning
+      `resulting_state`: the one with that submission ID;
+    - both players see "Refreshed: Amber Host won." and the victory panel after Refresh, after
+      a reload, and after resuming from the lobby (the card shows the winner);
+    - replaying the winning submission with the victor's session is `duplicate` with no new row;
+      the loser reusing that ID gets `submission_conflict`;
+    - new submissions from either player (current or next turn) are `409 finished` and return
+      the finished state; the loser's direct writes to `matches` and `turns` fail with `42501`;
+      `matches` and `turns` are unchanged afterwards;
+    - a lost response to the winning submission: the victor shows "Turn pending", a reload
+      resends the same ID (answer dropped again), Retry gets `duplicate`, and the match has one
+      winning row. The opponent already sees the win meanwhile.
+
+    The finishing tests found that Refresh on a finished match said "Refreshed: waiting for
+    opponent." (now "Refreshed: <winner> won."; also covered in
+    `tests/online-controller.test.ts`).
 
   Not covered: real phones and touch input, mobile Safari/Firefox, slow or flaky real networks,
   PWA install/update and the service worker (blocked in these tests), and hosted Supabase.
 
 ## Manual Two-Browser Checklist
 
-Items 1-3, 5, 9, 10, and 11 are automated by `npm run test:e2e` on desktop Chromium against a local
-stack. Run the whole list on real phones against the hosted project before a playtest.
+Items 1-3, 5, and 8-11 are automated by `npm run test:e2e` on desktop Chromium against a local
+stack (item 8 for a win by defeating the last unit; a keep-capture win is not automated). Run the whole list on real phones against the hosted project before a playtest.
 
 Use two browser profiles (A = sun, B = moon) against a project with the new schema and function.
 

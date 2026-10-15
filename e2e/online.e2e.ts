@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { PLAYER_NAMES } from "../src/engine";
 import {
   accessToken,
@@ -26,47 +26,15 @@ import {
   undoTurn,
   unitPositions
 } from "./support/app";
+import { closePlayers, expectBoardMatchesServer, newPlayer, startDuel } from "./support/duel";
 import { matchRow, playerClient, turnRows } from "./support/server";
 import { TurnGate } from "./support/turnGate";
 
 // Two-player online flows through the rendered app, against the local Supabase stack: real
-// anonymous auth, the deployed-shape Edge Functions, and the database's RLS policies. Each
-// browser context is an independent player (own localStorage, own Supabase session); pages in
-// one context are tabs of the same profile, sharing localStorage and Web Locks.
+// anonymous auth, the deployed-shape Edge Functions, and the database's RLS policies. Players and
+// tabs: e2e/support/duel.ts.
 
-const pages: Page[] = [];
-
-async function newPlayer(browser: Browser): Promise<Page> {
-  const context = await browser.newContext();
-  const page = await context.newPage();
-  pages.push(page);
-  return page;
-}
-
-test.afterEach(async () => {
-  for (const page of pages.splice(0)) await page.context().close();
-});
-
-/** Sun creates a match and Moon joins it; both end on the board. */
-async function startDuel(browser: Browser, mapName?: string) {
-  const sun = await newPlayer(browser);
-  const moon = await newPlayer(browser);
-  await openApp(sun);
-  const match = await createOnlineMatch(sun, mapName);
-  await openApp(moon);
-  await joinOnlineMatch(moon, match.inviteCode);
-  await expect(message(moon)).toHaveText(`Joined match ${match.inviteCode} as moon.`);
-  return { sun, moon, ...match };
-}
-
-async function expectBoardMatchesServer(page: Page, matchId: string) {
-  const server = await matchRow(matchId);
-  await expect.poll(async () => {
-    const board = await displayedBoard(page);
-    return { turn: board.turnNumber, player: board.currentPlayer, units: unitPositions(board) };
-  }).toEqual({ turn: server.turn_number, player: server.current_player, units: unitPositions(server.state) });
-  return server;
-}
+test.afterEach(closePlayers);
 
 test("create, invite, join, list, resume, and both players submit turns", async ({ browser }) => {
   const { sun, moon, matchId, inviteCode } = await startDuel(browser);
@@ -370,6 +338,18 @@ test("Create during the lobby's first sign-in waits for it, so the new match bel
   await syncButton(sun).click();
   await expect(message(sun)).toHaveText("Refreshed: your turn.");
   await moveSomeUnit(sun);
+});
+
+test("leaving an online match after a reload returns to the online lobby", async ({ browser }) => {
+  const { moon, inviteCode } = await startDuel(browser);
+  await moon.reload();
+  await expect(syncButton(moon)).toBeEnabled();
+  await expect(status(moon)).toHaveCount(0);
+
+  await openMenu(moon);
+  await moon.locator(".play-menu").getByRole("button", { name: "Exit Match" }).click();
+  await expect(moon.getByText("Online Lobby")).toBeVisible();
+  await expect(lobbyCard(moon, inviteCode)).toContainText("side moon / turn 1");
 });
 
 test("a third player cannot see, join, read, or play another player's match", async ({ browser }) => {

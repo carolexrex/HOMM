@@ -1,9 +1,10 @@
 import { expect, type Page, type Response } from "@playwright/test";
-import { reachableTiles, type Coord, type MatchState, type PlayerId, type TurnAction } from "../../src/engine";
+import { applyTurnAction, reachableTiles, type Coord, type MatchState, type PlayerId, type TurnAction } from "../../src/engine";
 import { centerPan, clamp, projectCell } from "../../src/components/canvas/geometry";
 import { MAX_ZOOM, MIN_ZOOM, NATURAL_CELL, VIEWPORT_PADDING, type Layout } from "../../src/components/canvas/types";
 import type { OnlineDraft } from "../../src/lib/onlineDraft";
 import type { OnlineSession } from "../../src/lib/storage";
+import type { PressingAction } from "./finisher";
 
 /**
  * Drives the rendered app the way a player does: buttons, the invite field, and clicks on the
@@ -218,4 +219,33 @@ export async function moveSomeUnit(page: Page, skip: string[] = []): Promise<Ext
     await page.locator(".play-actions").getByRole("button", { name: "Clear" }).click();
   }
   throw new Error("No unit could be moved to an uncovered tile.");
+}
+
+/** Taps the acting unit, then the destination or target, starting from no selection. */
+export async function tapAction(page: Page, action: PressingAction) {
+  if (await page.locator(".play-selected").isVisible()) {
+    await page.locator(".play-actions").getByRole("button", { name: "Clear" }).click();
+    await expect(page.locator(".play-selected")).toHaveCount(0);
+  }
+  const state = await displayedBoard(page);
+  const actor = state.units.find((unit) => unit.id === (action.type === "move" ? action.unitId : action.attackerId))!;
+  await tapTile(page, actor);
+  await expect(page.locator(".play-selected")).toBeVisible();
+  await tapTile(page, action.type === "move" ? action.to : state.units.find((unit) => unit.id === action.targetId)!);
+}
+
+/**
+ * Plays a non-winning move or attack through the board, and waits until the draft stores it
+ * and the displayed board equals the engine's result.
+ */
+export async function playAction(page: Page, action: PressingAction) {
+  const session = (await onlineSession(page))!;
+  const before = await displayedBoard(page);
+  const draft = await storedDraft(page, session.matchId, session.side);
+  const expected = applyTurnAction(before, action);
+  expect(expected.ok, `${action.type} is legal`).toBe(true);
+  expect(expected.state.winner, "a non-winning action").toBeNull();
+  await tapAction(page, action);
+  await expect.poll(async () => (await storedDraft(page, session.matchId, session.side))?.actions).toEqual([...(draft?.actions ?? []), action]);
+  await expect.poll(async () => unitPositions(await displayedBoard(page))).toEqual(unitPositions(expected.state));
 }

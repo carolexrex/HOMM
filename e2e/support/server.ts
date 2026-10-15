@@ -20,12 +20,14 @@ export interface TurnRow {
   submission_id: string | null;
   submitted_by: string | null;
   actions: unknown[];
+  /** `resulting_state.winner`: set only on the row that won the match. */
+  winner: string | null;
 }
 
 export async function turnRows(matchId: string): Promise<TurnRow[]> {
   const { data, error } = await adminClient()
     .from("turns")
-    .select("turn_number, player_side, submission_id, submitted_by, actions")
+    .select("turn_number, player_side, submission_id, submitted_by, actions, winner:resulting_state->>winner")
     .eq("match_id", matchId)
     .order("turn_number");
   if (error) throw error;

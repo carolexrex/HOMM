@@ -1,4 +1,4 @@
-import { applyTurnActions, createMatch, reachableTiles, type MatchState, type PlayerId, type TurnAction } from "../src/engine";
+import { PLAYER_NAMES, applyTurnActions, createMatch, reachableTiles, type MatchState, type PlayerId, type TurnAction } from "../src/engine";
 import { OnlineMatchController } from "../src/app/onlineMatchController";
 import { OnlineRequestError, type TurnSubmissionAccepted } from "../src/lib/online";
 import { createLocalLockRunner, createOnlineDraftStore, onlineDraftLockName, type LockRunner } from "../src/lib/onlineDraftStore";
@@ -570,6 +570,19 @@ describe("terminal wins across tabs", () => {
     await b.refresh();
     expect(b.view.draft).toBeNull();
     expect(b.ui.board?.winner).toBe("sun");
+  });
+
+  it("announces the winner on Refresh instead of waiting for the opponent", async () => {
+    const { match, attack } = winningMatch();
+    const browser = createBrowser(match);
+    const a = browser.openTab();
+    await a.refresh();
+    await a.controller.submit(attack);
+    expect(browser.server.match.winner).toBe("sun");
+
+    await a.refresh(true);
+    expect(a.ui.message).toBe(`Refreshed: ${PLAYER_NAMES.sun} won.`);
+    expect(a.view.canPlay).toBe(false);
   });
 });
 
