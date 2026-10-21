@@ -1,4 +1,4 @@
-import { expect, type Browser, type Page } from "@playwright/test";
+import { expect, type Browser, type BrowserContextOptions, type Page } from "@playwright/test";
 import { createOnlineMatch, displayedBoard, joinOnlineMatch, message, openApp, unitPositions } from "./app";
 import { matchRow } from "./server";
 
@@ -7,8 +7,8 @@ import { matchRow } from "./server";
 
 const pages: Page[] = [];
 
-export async function newPlayer(browser: Browser): Promise<Page> {
-  const context = await browser.newContext();
+export async function newPlayer(browser: Browser, device: BrowserContextOptions = {}): Promise<Page> {
+  const context = await browser.newContext(device);
   const page = await context.newPage();
   pages.push(page);
   return page;
@@ -19,10 +19,10 @@ export async function closePlayers() {
   for (const page of pages.splice(0)) await page.context().close();
 }
 
-/** Sun creates a match and Moon joins it; both end on the board. */
-export async function startDuel(browser: Browser, mapName?: string) {
-  const sun = await newPlayer(browser);
-  const moon = await newPlayer(browser);
+/** Sun creates a match and Moon joins it; both end on the board. `devices` sets either player's screen. */
+export async function startDuel(browser: Browser, mapName?: string, devices: { sun?: BrowserContextOptions; moon?: BrowserContextOptions } = {}) {
+  const sun = await newPlayer(browser, devices.sun);
+  const moon = await newPlayer(browser, devices.moon);
   await openApp(sun);
   const match = await createOnlineMatch(sun, mapName);
   await openApp(moon);

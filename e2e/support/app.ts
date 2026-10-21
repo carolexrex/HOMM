@@ -1,7 +1,6 @@
 import { expect, type Page, type Response } from "@playwright/test";
 import { applyTurnAction, reachableTiles, type Coord, type MatchState, type PlayerId, type TurnAction } from "../../src/engine";
-import { centerPan, clamp, projectCell } from "../../src/components/canvas/geometry";
-import { MAX_ZOOM, MIN_ZOOM, NATURAL_CELL, VIEWPORT_PADDING, type Layout } from "../../src/components/canvas/types";
+import { NATURAL_CELL } from "../../src/components/canvas/types";
 import type { OnlineDraft } from "../../src/lib/onlineDraft";
 import type { OnlineSession } from "../../src/lib/storage";
 import type { PressingAction } from "./finisher";
@@ -152,44 +151,66 @@ export function unitPositions(state: MatchState) {
   return Object.fromEntries(state.units.map((unit) => [unit.id, { x: unit.x, y: unit.y, hp: unit.hp }]));
 }
 
-interface CanvasBox {
+export interface CanvasView {
   left: number;
   top: number;
   width: number;
   height: number;
+  /** The canvas's current zoom and board offset, which it publishes as data attributes. */
+  zoom: number;
+  panX: number;
+  panY: number;
+  mode: string;
+  fitZoom: number;
 }
 
-/** Screen point of a cell's centre, using the canvas's own layout and fit-zoom math. */
-async function cellPoint(page: Page, state: MatchState, coord: Coord) {
-  const box = await page.evaluate((): CanvasBox => {
+export async function canvasView(page: Page): Promise<CanvasView> {
+  return page.evaluate(() => {
     const wrap = document.querySelector<HTMLElement>(".canvas-wrap")!;
     const rect = wrap.getBoundingClientRect();
-    return { left: rect.left, top: rect.top, width: wrap.clientWidth, height: wrap.clientHeight };
+    const data = wrap.dataset;
+    return {
+      left: rect.left,
+      top: rect.top,
+      width: wrap.clientWidth,
+      height: wrap.clientHeight,
+      zoom: Number(data.zoom),
+      panX: Number(data.panX),
+      panY: Number(data.panY),
+      mode: data.view ?? "",
+      fitZoom: Number(data.fitZoom)
+    };
   });
-  const cols = state.board[0].length;
-  const rows = state.board.length;
-  const boardWidth = cols * NATURAL_CELL;
-  const boardHeight = rows * NATURAL_CELL;
-  const fitZoom = clamp(Math.min((box.width - VIEWPORT_PADDING * 2) / boardWidth, (box.height - VIEWPORT_PADDING * 2) / boardHeight), MIN_ZOOM, MAX_ZOOM);
-  const layout: Layout = { cols, rows, width: box.width, height: box.height, boardWidth, boardHeight, fitZoom, step: NATURAL_CELL };
-  const cell = projectCell(coord, layout, centerPan(fitZoom, layout), fitZoom);
-  return { x: box.left + cell.centerX, y: box.top + cell.centerY };
 }
 
-/** Whether a click on the cell reaches the board (no panel or overlay covers it). */
-async function tappable(page: Page, state: MatchState, coord: Coord) {
-  const point = await cellPoint(page, state, coord);
+/** Screen point of a cell's centre in the board's current view. */
+export async function cellPoint(page: Page, coord: Coord) {
+  const view = await canvasView(page);
+  const size = NATURAL_CELL * view.zoom;
+  return { x: view.left + view.panX + (coord.x + 0.5) * size, y: view.top + view.panY + (coord.y + 0.5) * size };
+}
+
+/**
+ * Whether a tap on the cell reaches the board: it is on screen, and nothing covers its centre or
+ * lies within a fingertip of it. (Touch browsers move a tap that lands just beside a button onto
+ * the button, so a tile next to the zoom controls is not reliably tappable.)
+ */
+export async function tappable(page: Page, coord: Coord) {
+  const point = await cellPoint(page, coord);
   return page.evaluate(({ x, y }) => {
     const layer = document.querySelector(".canvas-wrap")?.children[1];
-    return Boolean(layer) && document.elementFromPoint(x, y) === layer;
+    const reach = 14;
+    const around = [[0, 0], [reach, 0], [-reach, 0], [0, reach], [0, -reach]];
+    return Boolean(layer) && around.every(([dx, dy]) => document.elementFromPoint(x + dx, y + dy) === layer);
   }, point);
 }
 
+/** Taps a cell: a touch tap on a touch device, else a mouse click. */
 export async function tapTile(page: Page, coord: Coord) {
-  const state = await displayedBoard(page);
-  expect(await tappable(page, state, coord), `cell ${coord.x},${coord.y} is not covered`).toBe(true);
-  const point = await cellPoint(page, state, coord);
-  await page.mouse.click(point.x, point.y);
+  expect(await tappable(page, coord), `cell ${coord.x},${coord.y} is on screen and not covered`).toBe(true);
+  const point = await cellPoint(page, coord);
+  if (await page.evaluate(() => navigator.maxTouchPoints > 0)) await page.touchscreen.tap(point.x, point.y);
+  else await page.mouse.click(point.x, point.y);
 }
 
 /**
@@ -204,11 +225,11 @@ export async function moveSomeUnit(page: Page, skip: string[] = []): Promise<Ext
   const candidates = state.units.filter((unit) => unit.owner === state.currentPlayer && !unit.moved && !skip.includes(unit.id));
   for (const unit of candidates) {
     const destinations = reachableTiles(state, unit.id).filter((tile) => !occupied.has(`${tile.x},${tile.y}`));
-    if (!destinations.length || !(await tappable(page, state, unit))) continue;
+    if (!destinations.length || !(await tappable(page, unit))) continue;
     await tapTile(page, unit);
     await expect(page.locator(".play-selected")).toBeVisible();
     for (const to of destinations) {
-      if (!(await tappable(page, state, to))) continue;
+      if (!(await tappable(page, to))) continue;
       await tapTile(page, to);
       if (session) {
         await expect.poll(async () => (await storedDraft(page, session.matchId, session.side))?.actions.length ?? 0).toBe(before + 1);

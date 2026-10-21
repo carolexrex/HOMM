@@ -675,6 +675,7 @@ export function App() {
       {match ? (
         <PlayScreen
           match={match}
+          viewerSide={match.mode === "online" ? onlineSession?.side : match.mode === "ai" ? (["sun", "moon"] as const).find((side) => !isAiControlledPlayer("ai", side)) : undefined}
           selectedUnit={selectedUnit}
           selectedUnitId={selectedUnitId}
           reachable={reachable}

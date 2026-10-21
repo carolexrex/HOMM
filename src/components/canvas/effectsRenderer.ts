@@ -1,6 +1,7 @@
-import { Container, Graphics, Text, TextStyle } from "pixi.js";
+import { Container, Graphics, TextStyle } from "pixi.js";
 import { getUnitLevel } from "../../engine";
 import type { Coord, MatchState, UnitState } from "../../engine";
+import type { LabelSource } from "./boardScene";
 import { clamp, lerp, projectCell } from "./geometry";
 import {
   ARROW_COLOR,
@@ -23,11 +24,11 @@ const popupTextStyle = new TextStyle({ fill: 0xf4efe1, fontFamily: "Trebuchet MS
 const combatPreviewStyle = new TextStyle({ fill: 0xfff3ef, fontFamily: "Trebuchet MS", fontSize: 13, fontWeight: "800" });
 const combatPreviewMetaStyle = new TextStyle({ fill: 0xffd7cf, fontFamily: "Trebuchet MS", fontSize: 9, fontWeight: "700" });
 
-export function drawCombatPreview(root: Container, preview: { damage: number; retaliation: number }, cell: ProjectedCell, zoom: number) {
-  const label = preview.retaliation > 0 ? `${preview.damage} / ${preview.retaliation}` : `${preview.damage}`;
+export function drawCombatPreview(root: Container, preview: { damage: number; retaliation: number }, cell: ProjectedCell, zoom: number, label: LabelSource) {
+  const value = preview.retaliation > 0 ? `${preview.damage} / ${preview.retaliation}` : `${preview.damage}`;
   const meta = preview.retaliation > 0 ? "damage / back" : "damage";
-  const valueText = new Text(label, combatPreviewStyle);
-  const metaText = new Text(meta, combatPreviewMetaStyle);
+  const valueText = label(value, combatPreviewStyle, "combat");
+  const metaText = label(meta, combatPreviewMetaStyle, "combat-meta");
   valueText.anchor.set(0.5, 0.5);
   metaText.anchor.set(0.5, 0.5);
   valueText.scale.set(Math.max(0.95, zoom * 1.02));
@@ -64,16 +65,16 @@ export function drawCombatPreview(root: Container, preview: { damage: number; re
   root.addChild(metaText);
 }
 
-export function drawPopupEffect(root: Container, popup: PopupVisual, layout: Layout, pan: PanState, zoom: number, now: number) {
+export function drawPopupEffect(root: Container, popup: PopupVisual, layout: Layout, pan: PanState, zoom: number, now: number, label: LabelSource) {
   const progress = clamp((now - popup.start) / popup.duration, 0, 1);
   const projected = projectCell(popup.coord, layout, pan, zoom);
-  const label = new Text(popup.label, popupTextStyle);
-  label.anchor.set(0.5);
-  label.x = projected.centerX;
-  label.y = projected.centerY - projected.size * (0.15 + progress * 0.3);
-  label.alpha = 1 - progress;
-  label.tint = popup.color;
-  root.addChild(label);
+  const text = label(popup.label, popupTextStyle, "popup");
+  text.anchor.set(0.5);
+  text.x = projected.centerX;
+  text.y = projected.centerY - projected.size * (0.15 + progress * 0.3);
+  text.alpha = 1 - progress;
+  text.tint = popup.color;
+  root.addChild(text);
 }
 
 export function drawAttackEffect(root: Container, attack: AttackVisual, layout: Layout, pan: PanState, zoom: number, now: number) {
@@ -81,6 +82,7 @@ export function drawAttackEffect(root: Container, attack: AttackVisual, layout: 
   const from = projectCell(attack.from, layout, pan, zoom);
   const to = projectCell(attack.to, layout, pan, zoom);
   const effect = new Graphics();
+  effect.name = "attack";
 
   if (attack.kind === "slash") {
     effect.lineStyle(Math.max(2, zoom * 3), attack.color, 1 - progress * 0.25);

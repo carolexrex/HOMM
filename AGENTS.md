@@ -31,6 +31,13 @@ Current priorities are readable mobile gameplay, local hot-seat play, and a Supa
 - Keep async online server-authoritative when implemented.
 - Preserve readability over visual detail, especially for map tiles and units.
 
+## Background Resources And Cleanup
+- Record which services are already running before starting background resources.
+- Track the processes, npm/dev servers, watchers, Docker containers, and stacks started for the task.
+- Stop resources started by the agent when the task ends, including after failures or cancellation, unless the user explicitly asks to leave them running.
+- Leave pre-existing services and resources started by the user or other agents untouched. Use tracked process/container IDs rather than broad kill or shutdown commands.
+- Cleanup must preserve application data and Docker volumes.
+
 ## Validation
 Run `npm test` and `npm run build` after meaningful changes when possible.
 

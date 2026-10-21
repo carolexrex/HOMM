@@ -19,17 +19,31 @@ export default defineConfig({
   reporter: [["list"]],
   outputDir: "test-results/e2e",
   use: {
-    ...devices["Desktop Chrome"],
-    // Full Chromium in new headless mode renders the PixiJS (WebGL) board on the GPU. The default
-    // headless shell renders it in software, which starved the page for minutes when two boards
-    // were open at once.
-    channel: "chromium",
     baseURL: `http://127.0.0.1:${PORT}`,
-    viewport: { width: 1280, height: 860 },
     // The service worker would cache the shell between tests; requests must reach the routes.
     serviceWorkers: "block",
     trace: "retain-on-failure"
   },
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        // Full Chromium in new headless mode renders the PixiJS (WebGL) board on the GPU. The
+        // default headless shell renders it in software, which starved the page for minutes when
+        // two boards were open at once.
+        channel: "chromium",
+        viewport: { width: 1280, height: 860 }
+      }
+    },
+    {
+      // Playwright's build of WebKit, Safari's engine, on a Retina-density desktop. It is not
+      // Safari itself (see README.md), and runs the rendering-resource suite only.
+      name: "webkit",
+      testMatch: "resources.e2e.ts",
+      use: { ...devices["Desktop Safari"], viewport: { width: 1280, height: 860 } }
+    }
+  ],
   webServer: {
     command: `npx vite build --outDir dist-e2e --emptyOutDir && npx vite preview --outDir dist-e2e --host 127.0.0.1 --port ${PORT} --strictPort`,
     url: `http://127.0.0.1:${PORT}`,

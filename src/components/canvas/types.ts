@@ -3,6 +3,8 @@ import type { Coord } from "../../engine";
 export interface SurfaceSize { width: number; height: number; }
 export interface PanState { x: number; y: number; }
 
+export interface Rect { left: number; top: number; right: number; bottom: number; }
+
 export interface Layout {
   cols: number;
   rows: number;
@@ -10,9 +12,14 @@ export interface Layout {
   height: number;
   boardWidth: number;
   boardHeight: number;
+  /** Zoom at which the whole board fits beside or below the zoom controls. */
   fitZoom: number;
   step: number;
+  /** The zoom controls in the top-right corner of the canvas. */
+  controls: Rect;
 }
+
+export interface BoardView { zoom: number; pan: PanState; }
 
 export interface ProjectedCell {
   x: number;
@@ -74,8 +81,14 @@ export interface ActiveVisuals {
 
 export const NATURAL_CELL = 84;
 export const VIEWPORT_PADDING = 12;
-export const BOARD_TOP_PADDING = 16;
+/** Space kept between the board and the zoom controls. */
+export const CONTROLS_GAP = 6;
+/** Zooming out stops here, or at the whole-board fit when that is smaller. */
 export const MIN_ZOOM = 0.45;
+/** About 52px tiles: the smallest at which units stay readable and easy to tap on a phone. */
+export const READABLE_ZOOM = 0.62;
+/** The play view fills the canvas height on narrow screens, up to this zoom. */
+export const PLAY_MAX_ZOOM = 1;
 export const MAX_ZOOM = 2.2;
 export const MOVE_ANIMATION_MS = 220;
 export const PROJECTILE_MS = 240;

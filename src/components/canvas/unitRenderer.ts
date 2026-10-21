@@ -1,4 +1,4 @@
-import { Container, Graphics, Sprite, Text, TextStyle, Texture } from "pixi.js";
+import { Container, Graphics, Sprite, TextStyle, Texture } from "pixi.js";
 import { getUnitLevel, PLAYER_COLORS, unitDefinitions } from "../../engine";
 import type { UnitKind, UnitState } from "../../engine";
 import militiaUrl from "../../assets/units/militia.png";
@@ -9,6 +9,7 @@ import cavalryUrl from "../../assets/units/cavalry.png";
 import assassinUrl from "../../assets/units/assassin.png";
 import catapultUrl from "../../assets/units/catapult.png";
 import healerUrl from "../../assets/units/healer.png";
+import type { LabelSource } from "./boardScene";
 import { NATURAL_CELL } from "./types";
 
 const popupDarkStyle = new TextStyle({ fill: 0x102125, fontFamily: "Trebuchet MS", fontSize: 10, fontWeight: "700" });
@@ -39,7 +40,7 @@ export function getUnitRenderSize(zoom: number) {
   return NATURAL_CELL * zoom;
 }
 
-export function drawUnit(root: Container, unit: UnitState, x: number, y: number, size: number, zoom: number, selected: boolean) {
+export function drawUnit(root: Container, unit: UnitState, x: number, y: number, size: number, zoom: number, selected: boolean, label: LabelSource) {
   const container = new Container();
   container.x = x;
   container.y = y;
@@ -164,7 +165,7 @@ export function drawUnit(root: Container, unit: UnitState, x: number, y: number,
   hpFill.endFill();
   container.addChild(hpFill);
 
-  const hpText = new Text(String(unit.hp), popupDarkStyle);
+  const hpText = label(String(unit.hp), popupDarkStyle, "hp");
   hpText.anchor.set(0.5);
   hpText.x = size * 0.5;
   hpText.y = size * 0.88;

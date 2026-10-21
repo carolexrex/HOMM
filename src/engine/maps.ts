@@ -138,7 +138,7 @@ export const maps: MapDefinition[] = [
   buildMap(
     "thornwatch",
     "Thornwatch",
-    ["krrv..", ".ffr..", ".rhh..", "v.r.ss", ".rhh..", ".ffr..", "krrv.."],
+    ["krrv..", ".ffrrr", "..hr.s", "vrrrss", "..hr.s", ".ffrrr", "krrv.."],
     [
       { kind: "militia", at: { x: 1, y: 2 } },
       { kind: "swordsman", at: { x: 2, y: 3 } },
@@ -151,7 +151,7 @@ export const maps: MapDefinition[] = [
   buildMap(
     "sunken-road",
     "Sunken Road",
-    ["krr.v.~", ".srr..~", ".hrrr.=", "v.sss.~", ".hrrr.=", ".srr..~", "krr.v.~"],
+    ["krrrv.~", ".srs..~", ".hrrrr=", "v.sss.~", ".hrrrr=", ".srs..~", "krrrv.~"],
     [
       { kind: "militia", at: { x: 1, y: 1 } },
       { kind: "swordsman", at: { x: 2, y: 3 } },
@@ -164,7 +164,7 @@ export const maps: MapDefinition[] = [
   buildMap(
     "citadel-pass",
     "Citadel Pass",
-    ["krr..v.~", ".f..hr.~", ".rr.r..=", "v..rrh.=", ".rr.r..=", ".f..hr.~", "krr..v.~"],
+    ["krrrrv.~", ".f..hr.~", "....rrr=", "vrrrrhr=", "....rrr=", ".f..hr.~", "krrrrv.~"],
     [
       { kind: "militia", at: { x: 1, y: 1 } },
       { kind: "swordsman", at: { x: 2, y: 3 } },
@@ -178,7 +178,7 @@ export const maps: MapDefinition[] = [
   buildMap(
     "lakewatch",
     "Lakewatch",
-    ["krr..v..", ".fr..r..", "..r.cwww", "v.r.cwww", ".hr.cwww", "..r.cwww", ".fr..r..", "krr..v.."],
+    ["krrrrvrr", ".fr.....", "..r..www", "v.r.cwww", ".hr.cwww", "..r..www", ".fr.....", "krrrrvrr"],
     [
       { kind: "militia", at: { x: 1, y: 1 } },
       { kind: "swordsman", at: { x: 2, y: 3 } },

@@ -9,7 +9,6 @@ import hillUrl from "../../assets/terrain_hill.png";
 import keepUrl from "../../assets/terrain_keep.png";
 import bridgeUrl from "../../assets/terrain_bridge.png";
 import bridgeWideUrl from "../../assets/terrain_bridge_wide.png";
-import swampUrl from "../../assets/terrain_swamp.png";
 import villageUrl from "../../assets/terrain_town.png";
 import roadHorizontalUrl from "../../assets/terrain_road_horizontal.png";
 import roadVerticalUrl from "../../assets/terrain_road_vertical.png";
@@ -18,16 +17,14 @@ import roadCrossroadsUrl from "../../assets/terrain_crossroads.png";
 import roadTJunctionUrl from "../../assets/terrain_road_t_junction.png";
 import roadTJunctionRightUrl from "../../assets/terrain_road_t_junction_right.png";
 import roadTJunctionLeftUrl from "../../assets/terrain_road_t_junction_left.png";
-import roadTJunctionUpUrl from "../../assets/terrain_road_t_junction_up.png";
 import riverHorizontalUrl from "../../assets/terrain_river_horizontal.png";
 import riverCornerUrl from "../../assets/terrain_river_corner.png";
 import riverTJunctionUrl from "../../assets/terrain_river_t_junction.png";
 import riverCrossroadsUrl from "../../assets/terrain_river_crossroads.png";
 import riverEdgeUrl from "../../assets/terrain_river_edge.png";
-import waterOpenUrl from "../../assets/terrain/water_open.png";
-import shoreOverlayUrl from "../../assets/terrain/shore_overlay.png";
 import type { ProjectedCell } from "./types";
 import { clamp } from "./geometry";
+import { REGION_TERRAIN } from "./regionRenderer";
 
 const terrainTextures = {
   plains: Texture.from(plainsUrl),
@@ -38,7 +35,6 @@ const terrainTextures = {
   keep: Texture.from(keepUrl),
   bridge: Texture.from(bridgeUrl),
   bridgeWide: Texture.from(bridgeWideUrl),
-  swamp: Texture.from(swampUrl),
   village: Texture.from(villageUrl)
 };
 
@@ -49,8 +45,7 @@ const roadTextures = {
   cross: Texture.from(roadCrossroadsUrl),
   t: Texture.from(roadTJunctionUrl),
   tRight: Texture.from(roadTJunctionRightUrl),
-  tLeft: Texture.from(roadTJunctionLeftUrl),
-  tUp: Texture.from(roadTJunctionUpUrl)
+  tLeft: Texture.from(roadTJunctionLeftUrl)
 };
 
 const riverTextures = {
@@ -58,9 +53,7 @@ const riverTextures = {
   corner: Texture.from(riverCornerUrl),
   t: Texture.from(riverTJunctionUrl),
   cross: Texture.from(riverCrossroadsUrl),
-  edge: Texture.from(riverEdgeUrl),
-  water: Texture.from(waterOpenUrl),
-  shore: Texture.from(shoreOverlayUrl)
+  edge: Texture.from(riverEdgeUrl)
 };
 
 export function drawHighlight(root: Container, cell: ProjectedCell, fill: number, fillAlpha: number, stroke: number, strokeAlpha: number) {
@@ -92,19 +85,9 @@ export function drawTerrain(root: Container, state: MatchState, tile: TileState,
     return;
   }
 
-  if (tile.terrain === "water") {
-    const fringe = waterFringeRotation(state, tile);
-    if (fringe === null) {
-      drawBaseTerrainSprite(root, riverTextures.water, x, y, size, 0, terrainTint(tile));
-    } else {
-      drawPlainsTile(root, tile, x, y, size);
-      drawBaseTerrainSprite(root, riverTextures.shore, x, y, size, fringe);
-    }
-    return;
-  }
-
-  if (tile.terrain === "shore") {
-    drawShoreTile(root, state, tile, x, y, size);
+  if (REGION_TERRAIN.includes(tile.terrain)) {
+    // Swamps and lakes are drawn over this grass as whole regions (drawTerrainRegions).
+    drawPlainsTile(root, tile, x, y, size);
     return;
   }
 
@@ -188,11 +171,6 @@ function drawRiverTile(root: Container, state: MatchState, tile: TileState, x: n
   drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation);
 }
 
-function drawShoreTile(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
-  drawPlainsTile(root, tile, x, y, size);
-  drawBaseTerrainSprite(root, riverTextures.shore, x, y, size, shoreRotation(state, tile));
-}
-
 function resolveRoadSprite(dirs: Array<"n" | "s" | "e" | "w">): { texture: Texture; rotation?: number } {
   const hasN = dirs.includes("n");
   const hasS = dirs.includes("s");
@@ -203,7 +181,8 @@ function resolveRoadSprite(dirs: Array<"n" | "s" | "e" | "w">): { texture: Textu
   if (dirs.length === 3) {
     if (!hasN) return { texture: roadTextures.t };
     if (!hasE) return { texture: roadTextures.tLeft };
-    if (!hasS) return { texture: roadTextures.tUp };
+    // The dedicated north-facing T has washed-out grass that shows as a pale square; turn the south-facing one instead.
+    if (!hasS) return { texture: roadTextures.t, rotation: Math.PI };
     return { texture: roadTextures.tRight };
   }
   if (dirs.length === 2) {
@@ -268,7 +247,6 @@ function resolveTerrainSprite(state: MatchState, tile: TileState): { texture: Te
     case "plains": return { texture: selectPlainsTexture(tile), rotation: terrainRotation(tile), tint: terrainTint(tile) };
     case "forest": return { texture: terrainTextures.forest };
     case "hill": return { texture: terrainTextures.hill };
-    case "swamp": return { texture: terrainTextures.swamp };
     case "village": return { texture: terrainTextures.village };
     case "keep": return { texture: terrainTextures.keep };
     case "bridge": {
@@ -294,29 +272,6 @@ function selectPlainsTexture(tile: TileState): Texture {
 function shouldRotateBridge(state: MatchState, tile: TileState): boolean {
   const riverDirs = neighborDirections(state, tile, ["river"]);
   return riverDirs.includes("n") || riverDirs.includes("s");
-}
-
-function waterFringeRotation(state: MatchState, tile: TileState): number | null {
-  const landDirs: Array<"n" | "s" | "e" | "w"> = [];
-  const checks: Array<["n" | "s" | "e" | "w", number, number]> = [["n", 0, -1], ["s", 0, 1], ["w", -1, 0], ["e", 1, 0]];
-  for (const [dir, dx, dy] of checks) {
-    const next = state.board[tile.y + dy]?.[tile.x + dx];
-    if (next && next.terrain !== "water" && next.terrain !== "shore") landDirs.push(dir);
-  }
-  if (landDirs.includes("n")) return 0;
-  if (landDirs.includes("s")) return Math.PI;
-  if (landDirs.includes("w")) return -Math.PI / 2;
-  if (landDirs.includes("e")) return Math.PI / 2;
-  return null;
-}
-
-function shoreRotation(state: MatchState, tile: TileState): number {
-  const waterDirs = neighborDirections(state, tile, ["water"]);
-  if (waterDirs.includes("s")) return 0;
-  if (waterDirs.includes("w")) return Math.PI / 2;
-  if (waterDirs.includes("n")) return Math.PI;
-  if (waterDirs.includes("e")) return -Math.PI / 2;
-  return 0;
 }
 
 function terrainTint(tile: TileState): number {

@@ -14,6 +14,7 @@ import {
   type Coord,
   type EconomyMode,
   type MatchState,
+  type PlayerId,
   type UnitKind,
   type UnitState
 } from "../engine";
@@ -25,6 +26,8 @@ import { HudIcon } from "./HudIcon";
 
 interface PlayScreenProps {
   match: MatchState;
+  /** The player at this screen when that is fixed (online, or against the AI); the board view centres on their army. */
+  viewerSide?: PlayerId;
   selectedUnit: UnitState | null;
   selectedUnitId: string | null;
   reachable: Coord[];
@@ -66,6 +69,7 @@ interface PlayScreenProps {
 
 export function PlayScreen({
   match,
+  viewerSide,
   selectedUnit,
   selectedUnitId,
   reachable,
@@ -159,6 +163,7 @@ export function PlayScreen({
           attackPreviews={combatPreviews}
           animateMovement={moveAnimation === "animated"}
           showHint={false}
+          focusPlayer={viewerSide}
         />
 
         <div className="play-overlays">

@@ -814,7 +814,9 @@ button:disabled { opacity: 0.45; }
   }
 
   .play-board .canvas-wrap {
-    min-height: min(62dvh, 620px);
+    /* The board takes the height the header, top bar, and actions leave (about 300px), so a
+       portrait phone shows the whole page without scrolling. */
+    min-height: clamp(340px, calc(100dvh - 300px), 640px);
   }
 
   .play-selected,

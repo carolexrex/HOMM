@@ -61,10 +61,20 @@ Still manual before a two-player playtest (checklist in `docs/online-turns.md`):
 ## Phase 2: Mobile UX And Map/Layout Polish
 
 Must-have:
-- [ ] Audit all shipped maps on real mobile-sized layouts.
+- [x] Audit all shipped maps at 390x844 (emulated) and desktop sizes (October 16, 2026): screenshots
+  of all six maps, and `e2e/maps.e2e.ts` exercises selection, movement, panning, pinch, and End Turn
+  on each. Real phones are still to do.
 - [ ] Fix HUD overlap, drawer, sheet, and safe-area issues.
-- [ ] Confirm current board zoom/pan defaults hold up across the shipped maps, and adjust only if real readability issues appear.
-- [ ] Resolve any map readability issues that affect play decisions.
+- [x] Board zoom/pan defaults: Fit is now a true whole-board fit (it was held at a minimum zoom that
+  cut off wide maps on phones and centred Lakewatch's empty lake), each turn opens on the player's
+  army at a readable zoom, the board fills the phone's height, and the zoom controls no longer cover
+  tiles in the fit view.
+- [x] Map readability: Thornwatch, Sunken Road, Citadel Pass, and Lakewatch have deliberate road
+  networks with connected bridge approaches and no isolated or dead-end roads; swamps blend into the
+  grass; the lake has rounded shores. `tests/map-topology.test.ts` guards symmetry, spawns,
+  reachability, and the intended routes.
+- [ ] Two road textures still show as pale squares (the crossroads on Ashen Ford, and the dedicated
+  north-facing T, which the renderer now avoids by turning the south-facing one).
 
 Nice-to-have:
 - [ ] Refine overlay timing and transitions.
