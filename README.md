@@ -8,7 +8,7 @@ Bannerfront is a mobile-first fantasy tactics PWA built with React, TypeScript, 
 - Playable modes: hot-seat, solo vs AI, and async online.
 - Six mirrored maps: Meadow Line, Ashen Ford, Thornwatch, Sunken Road, Citadel Pass, and Lakewatch.
 - Terrain-driven play with roads, forests, hills, swamps, rivers, bridges, water, shorelines, villages, and keeps.
-- Mobile board view: on a phone each turn opens at a readable zoom on the player's army, Fit shows the whole board (and Focus returns), and the board is dragged and pinched. Swamps and lakes are drawn as continuous regions with soft, rounded edges.
+- Mobile board view: on a phone each turn opens at a readable zoom on the player's army, Fit shows the whole board (and Focus returns), and the board is dragged and pinched. The terrain is one continuous painted surface: shared grass, roads that join seamlessly at every junction, and swamps, lakes, and rivers drawn as continuous regions.
 - Supabase schema with Row Level Security policies and Edge Functions for guest profile, match create/join/list/resume, and server-side turn commits.
 - Versioned, idempotent online turn submissions: each turn carries the expected turn number and a client-generated submission ID, so stale turns are rejected and retries never apply twice. See [docs/online-turns.md](docs/online-turns.md).
 - Recoverable online drafts: unsent moves and pending submissions survive reloads and network failures and are reconciled with the server before play continues.
@@ -106,18 +106,49 @@ process, memory limits, and canvas budget can differ, so it does not replace a c
 
 ## Terrain Art
 
-Terrain tiles live in `src/assets`. Generated variants are rebuilt by scripts (they need Pillow
-and NumPy in a local virtualenv; nothing ships at runtime):
+The board is drawn as one continuous grass surface with masked overlays, not one opaque painting
+per tile (each painted tile had its own grass, so roads, junctions, rivers, and features showed
+as square patches). `src/components/canvas/terrainRenderer.ts` builds a static layer once per map,
+in board coordinates, and moves and scales it with the view; nothing in it is redrawn per frame:
 
-- `scripts/generate_river_tiles.py`: river bends, junctions, the wide-river edge and bridge.
-- `scripts/generate_swamp_and_lake_tiles.py`: `terrain_swamp.jpg` (the original painted bog,
-  regraded towards the grass palette with larger features), `terrain/lake_water.jpg` (seamless
-  open water without mirrored repeats), and `terrain/shore_bank.jpg` (the lake's gravel bank).
+1. `grass_base.jpg` filled across the whole board (a copy per 2x2 tiles), with `grass_tone.png`
+   multiplied over it at 5.37 tiles per copy so the light and shade never line up with the grid.
+2. Rocks, clover, and bushes (`grass_decals.png`) placed inside plains tiles.
+3. Road overlays, `road_<n><e><s><w>.png`: one per set of connected sides, all mapped from one
+   painted road profile, so every straight, corner, T, crossroads, dead end, bridge approach, and
+   village or keep entrance has the same width and the same pixels where it crosses a tile side.
+   Each is baked in its final orientation, so the painted light is the same everywhere.
+4. Swamps, lakes, and rivers as continuous regions (`regionRenderer.ts`): one texture runs across
+   a whole region, and only land-facing edges are inset and softened. The lake (water and shore
+   tiles, all impassable) is filled to its tile edges. The river (`river_water.jpg`, bluer and
+   streaked with current, unlike the still, grey-green lake) runs under its bridges and on past
+   the board's edge, with painted pebble banks (`river_bank.png`) along its land-facing sides.
+5. Forests, hills, villages, and keeps, masked to their objects over the shared grass and
+   regraded to its palette (the keep's painted south road is removed; roads follow its real
+   connections).
+6. Bridge decks (`bridge_deck.png`), whose gravel approaches are regraded to the road gravel.
 
-Swamps and lakes are drawn by `src/components/canvas/regionRenderer.ts`: one texture runs across a
-whole region in board coordinates, only land-facing edges are inset, softened, and rounded, and the
-lake (its water and shore tiles, all impassable) is filled to its tile edges, so the visible water
-matches where units cannot go.
+Art that is turned for another orientation (west and east river banks, north-south bridge decks)
+is transposed, never rotated, so light from the top left stays top-left. What goes on each tile is
+decided by `terrainPlan.ts`, which `tests/terrain-plan.test.ts` checks on every map.
+
+Everything in `src/assets/terrain/board/` is derived from the hand-painted tiles in `src/assets`
+(which are kept as sources but no longer bundled) by `scripts/build_terrain_art.py`. It needs
+Pillow and NumPy in a local virtualenv, is seeded (a rebuild is byte-identical), and ends by
+checking every join: road variants that meet across a tile side, the wrap-around of each repeating
+texture, and the bank strips must show no step steeper than one already inside the art. All
+outputs are power-of-two sizes (at most 1024 px) so the GPU can mipmap them; together they are
+about 3.5 MB to download.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install pillow numpy
+.venv/bin/python scripts/build_terrain_art.py
+```
+
+Older generators: `scripts/generate_swamp_and_lake_tiles.py` builds `terrain_swamp.jpg`,
+`terrain/lake_water.jpg`, and `terrain/shore_bank.jpg`, which are still used.
+`scripts/generate_river_tiles.py` built the per-tile river art the board used before, which is
+no longer drawn.
 
 ## Environment
 

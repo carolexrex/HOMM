@@ -15,8 +15,7 @@ import {
   type SurfaceSize
 } from "./canvas/types";
 import { boardLayout, clamp, clampPan, distance, fitView, hitTestCell, idleInteraction, minZoom, playView, projectCell } from "./canvas/geometry";
-import { drawHighlight, drawTerrain } from "./canvas/terrainRenderer";
-import { buildTerrainRegions, regionTexturesReady } from "./canvas/regionRenderer";
+import { buildTerrainLayer, drawHighlight, drawOwnershipMarker, terrainTexturesReady } from "./canvas/terrainRenderer";
 import { drawUnit, getUnitRenderSize } from "./canvas/unitRenderer";
 import { BoardScene } from "./canvas/boardScene";
 import { trackCanvasApp } from "./canvas/resourceProbe";
@@ -87,7 +86,7 @@ export function GameCanvas({ state, selectedUnitId, reachable, attackableIds, he
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState<PanState>({ x: VIEWPORT_PADDING, y: VIEWPORT_PADDING });
   const [viewMode, setViewMode] = useState<ViewMode>("play");
-  const [regionsReady, setRegionsReady] = useState(false);
+  const [terrainReady, setTerrainReady] = useState(false);
   const [showPanHint, setShowPanHint] = useState(() => !panHintSeen());
   const [spacePressed, setSpacePressed] = useState(false);
   const [visualTick, setVisualTick] = useState(0);
@@ -162,8 +161,8 @@ export function GameCanvas({ state, selectedUnitId, reachable, attackableIds, he
 
   useEffect(() => {
     let active = true;
-    void regionTexturesReady.then(() => {
-      if (active) setRegionsReady(true);
+    void terrainTexturesReady.then(() => {
+      if (active) setTerrainReady(true);
     });
     return () => {
       active = false;
@@ -177,7 +176,7 @@ export function GameCanvas({ state, selectedUnitId, reachable, attackableIds, he
     return boardLayout({ width, height }, state.board[0].length, state.board.length, controlsRect(width, compactControls));
   }, [state.board, surface, compactControls]);
 
-  // The swamps and lakes depend only on the terrain, which no action changes.
+  // The terrain layer depends only on the terrain, which no action changes.
   const terrainKey = useMemo(() => state.board.map((row) => row.map((tile) => tile.terrain).join()).join("|"), [state.board]);
 
   const viewPlayer = focusPlayer ?? state.currentPlayer;
@@ -263,17 +262,16 @@ export function GameCanvas({ state, selectedUnitId, reachable, attackableIds, he
     boardShadow.endFill();
     root.addChild(boardShadow);
 
-    for (const row of state.board) {
-      for (const tile of row) {
-        const projected = projectCell(tile, layout, pan, zoom);
-        drawTerrain(root, state, tile, projected.x, projected.y, projected.size);
-      }
+    if (terrainReady) {
+      const terrain = scene.terrainLayer(`${terrainKey}:${layout.step}`, () => buildTerrainLayer(state, layout.step));
+      terrain.position.set(pan.x, pan.y);
+      terrain.scale.set(zoom);
+      root.addChild(terrain);
     }
-    if (regionsReady) {
-      const regions = scene.regionLayer(`${terrainKey}:${layout.step}`, () => buildTerrainRegions(state, layout.step));
-      regions.position.set(pan.x, pan.y);
-      regions.scale.set(zoom);
-      root.addChild(regions);
+    for (const tile of state.board.flat()) {
+      if (!tile.structure) continue;
+      const projected = projectCell(tile, layout, pan, zoom);
+      drawOwnershipMarker(root, tile, projected.x, projected.y, projected.size);
     }
 
     for (const row of state.board) {
@@ -306,7 +304,7 @@ export function GameCanvas({ state, selectedUnitId, reachable, attackableIds, he
 
     for (const popup of activeVisuals.popups) drawPopupEffect(root, popup, layout, pan, zoom, now, scene.label);
     scene.end();
-  }, [attackPreviews, attackableIds, healableIds, layout, pan, reachable, selectedUnitId, state, animationClock, zoom, regionsReady, terrainKey]);
+  }, [attackPreviews, attackableIds, healableIds, layout, pan, reachable, selectedUnitId, state, animationClock, zoom, terrainReady, terrainKey]);
 
   /** The player found the board controls; the pan hint has done its job. */
   function dismissPanHint() {
@@ -457,7 +455,7 @@ export function GameCanvas({ state, selectedUnitId, reachable, attackableIds, he
       data-pan-x={pan.x}
       data-pan-y={pan.y}
       data-fit-zoom={layout.fitZoom}
-      data-regions={regionsReady ? "ready" : "loading"}
+      data-regions={terrainReady ? "ready" : "loading"}
     >
       <div ref={hostRef} style={{ position: "absolute", inset: 0 }} />
       <div onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={finishPointer} onPointerCancel={finishPointer} onWheel={handleWheel} style={{ position: "absolute", inset: 0, touchAction: "none", cursor: interactionRef.current.mode === "pan" ? "grabbing" : spacePressed ? "grab" : "default" }} />

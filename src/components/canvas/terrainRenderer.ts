@@ -1,60 +1,172 @@
-import { Container, Graphics, Sprite, Texture } from "pixi.js";
+import { BLEND_MODES, Container, Graphics, Matrix, Rectangle, Sprite, Texture } from "pixi.js";
 import { PLAYER_COLORS } from "../../engine";
-import type { MatchState, TerrainKind, TileState } from "../../engine";
-import plainsUrl from "../../assets/terrain_plains.png";
-import plains2Url from "../../assets/terrain_plains_2.png";
-import plains3Url from "../../assets/terrain_plains_3.png";
-import forestUrl from "../../assets/terrain_forest.png";
-import hillUrl from "../../assets/terrain_hill.png";
-import keepUrl from "../../assets/terrain_keep.png";
-import bridgeUrl from "../../assets/terrain_bridge.png";
-import bridgeWideUrl from "../../assets/terrain_bridge_wide.png";
-import villageUrl from "../../assets/terrain_town.png";
-import roadHorizontalUrl from "../../assets/terrain_road_horizontal.png";
-import roadVerticalUrl from "../../assets/terrain_road_vertical.png";
-import roadCornerUrl from "../../assets/terrain_corner.png";
-import roadCrossroadsUrl from "../../assets/terrain_crossroads.png";
-import roadTJunctionUrl from "../../assets/terrain_road_t_junction.png";
-import roadTJunctionRightUrl from "../../assets/terrain_road_t_junction_right.png";
-import roadTJunctionLeftUrl from "../../assets/terrain_road_t_junction_left.png";
-import riverHorizontalUrl from "../../assets/terrain_river_horizontal.png";
-import riverCornerUrl from "../../assets/terrain_river_corner.png";
-import riverTJunctionUrl from "../../assets/terrain_river_t_junction.png";
-import riverCrossroadsUrl from "../../assets/terrain_river_crossroads.png";
-import riverEdgeUrl from "../../assets/terrain_river_edge.png";
+import type { MatchState, TileState } from "../../engine";
+import grassBaseUrl from "../../assets/terrain/board/grass_base.jpg";
+import grassToneUrl from "../../assets/terrain/board/grass_tone.png";
+import grassDecalsUrl from "../../assets/terrain/board/grass_decals.png";
+import decalAtlas from "../../assets/terrain/board/decals.json";
+import bridgeDeckUrl from "../../assets/terrain/board/bridge_deck.png";
+import riverBankUrl from "../../assets/terrain/board/river_bank.png";
+import forestUrl from "../../assets/terrain/board/forest.png";
+import hillUrl from "../../assets/terrain/board/hill.png";
+import villageUrl from "../../assets/terrain/board/village.png";
+import keepUrl from "../../assets/terrain/board/keep.png";
 import type { ProjectedCell } from "./types";
-import { clamp } from "./geometry";
-import { REGION_TERRAIN } from "./regionRenderer";
+import { buildTerrainRegions, regionTexturesReady, texturesReady } from "./regionRenderer";
+import { DECK_FRAMES, planTerrain, type FeatureKind } from "./terrainPlan";
 
-const terrainTextures = {
-  plains: Texture.from(plainsUrl),
-  plains2: Texture.from(plains2Url),
-  plains3: Texture.from(plains3Url),
+/**
+ * The board's terrain is one static layer per map, built in board coordinates (tile 0,0 at the
+ * origin, `size` pixels per tile) and moved and scaled with the view, never redrawn per frame:
+ *
+ * 1. One seamless grass texture filled across the whole board (a copy per 2x2 tiles), with a
+ *    soft light-and-shade texture multiplied over it at a scale that does not line up with the
+ *    tiles, so there are no tile squares and no obvious repeat.
+ * 2. Rocks, clover, and bushes scattered over plains tiles.
+ * 3. Road overlays: transparent apart from the road, one per set of connected sides, all with
+ *    the same width and the same pixels where they cross a tile side (terrainPlan.ts).
+ * 4. Swamps, lakes, and rivers as continuous regions (regionRenderer.ts), with painted banks
+ *    along the river's land-facing sides.
+ * 5. Forests, hills, villages, and keeps, masked to their objects over the shared grass.
+ * 6. Bridge decks over the river.
+ *
+ * Every texture is shared art loaded once, all of it prepared offline by
+ * scripts/build_terrain_art.py. Textures filled by Graphics (the grass, its tone, and the region
+ * textures) are kept apart from those drawn by sprites, as Pixi switches fill textures to repeat.
+ */
+
+const roadUrls = import.meta.glob<string>("../../assets/terrain/board/road_*.png", { eager: true, import: "default" });
+
+const GRASS_TILES_PER_TEXTURE = 2;
+/** Not a whole number of tiles, so the light and shade never lines up with the tile grid. */
+const TONE_TILES_PER_TEXTURE = 5.37;
+
+const grassTextures = {
+  base: Texture.from(grassBaseUrl),
+  tone: Texture.from(grassToneUrl)
+};
+
+const featureTextures: Record<FeatureKind, Texture> = {
   forest: Texture.from(forestUrl),
   hill: Texture.from(hillUrl),
-  keep: Texture.from(keepUrl),
-  bridge: Texture.from(bridgeUrl),
-  bridgeWide: Texture.from(bridgeWideUrl),
-  village: Texture.from(villageUrl)
+  village: Texture.from(villageUrl),
+  keep: Texture.from(keepUrl)
 };
 
-const roadTextures = {
-  horizontal: Texture.from(roadHorizontalUrl),
-  vertical: Texture.from(roadVerticalUrl),
-  corner: Texture.from(roadCornerUrl),
-  cross: Texture.from(roadCrossroadsUrl),
-  t: Texture.from(roadTJunctionUrl),
-  tRight: Texture.from(roadTJunctionRightUrl),
-  tLeft: Texture.from(roadTJunctionLeftUrl)
-};
+const roadTextures = new Map<string, Texture>(
+  Object.entries(roadUrls).map(([path, url]) => [/road_(\d{4})\.png$/.exec(path)![1], Texture.from(url)])
+);
 
-const riverTextures = {
-  horizontal: Texture.from(riverHorizontalUrl),
-  corner: Texture.from(riverCornerUrl),
-  t: Texture.from(riverTJunctionUrl),
-  cross: Texture.from(riverCrossroadsUrl),
-  edge: Texture.from(riverEdgeUrl)
-};
+const decalSheet = Texture.from(grassDecalsUrl);
+const deckSheet = Texture.from(bridgeDeckUrl);
+const bankSheet = Texture.from(riverBankUrl);
+/** Depth of a bank strip, in tiles: its frame's height over its width. */
+const BANK_DEPTH = 0.25;
+
+/** Frames of the decal and deck sheets, cut once the sheets have loaded (they need their sizes). */
+let decalFrames: Texture[] = [];
+let deckFrames: Texture[] = [];
+/** The painting's north bank (land above the water) and south bank (land below). */
+let bankFrames: { north: Texture; south: Texture } | null = null;
+
+/** Resolves once every terrain texture has loaded; the layer is built only after this. */
+export const terrainTexturesReady: Promise<void> = Promise.all([
+  regionTexturesReady,
+  texturesReady([...Object.values(grassTextures), ...Object.values(featureTextures), ...roadTextures.values(), decalSheet, deckSheet, bankSheet])
+]).then(() => {
+  decalFrames = decalAtlas.frames.map((frame) => new Texture(decalSheet.baseTexture, new Rectangle(frame.x, frame.y, frame.w, frame.h)));
+  const deckWidth = deckSheet.width / DECK_FRAMES.length;
+  deckFrames = DECK_FRAMES.map((_, index) => new Texture(deckSheet.baseTexture, new Rectangle(index * deckWidth, 0, deckWidth, deckSheet.height)));
+  const half = bankSheet.height / 2;
+  bankFrames = {
+    north: new Texture(bankSheet.baseTexture, new Rectangle(0, 0, bankSheet.width, half)),
+    south: new Texture(bankSheet.baseTexture, new Rectangle(0, half, bankSheet.width, half))
+  };
+});
+
+/** Builds the static terrain layer for `state`'s map; `size` is the tile size in board pixels. */
+export function buildTerrainLayer(state: MatchState, size: number): Container {
+  const layer = new Container();
+  const cols = state.board[0].length;
+  const rows = state.board.length;
+  const plan = planTerrain(state, decalAtlas.frames, decalAtlas.tile);
+
+  layer.addChild(fill(grassTextures.base, GRASS_TILES_PER_TEXTURE, cols, rows, size));
+  const tone = fill(grassTextures.tone, TONE_TILES_PER_TEXTURE, cols, rows, size, 0.37);
+  tone.blendMode = BLEND_MODES.MULTIPLY;
+  layer.addChild(tone);
+
+  for (const decal of plan.decals) {
+    const sprite = new Sprite(decalFrames[decal.frame]);
+    sprite.anchor.set(0.5);
+    sprite.position.set(decal.x * size, decal.y * size);
+    sprite.width = decal.width * size;
+    sprite.height = decal.height * size;
+    layer.addChild(sprite);
+  }
+
+  for (const road of plan.roads) layer.addChild(tileSprite(roadTextures.get(road.key)!, road.x, road.y, size));
+  layer.addChild(buildTerrainRegions(state, size));
+  for (const bank of plan.banks) {
+    // Land to the north or west takes the painting's north bank, to the south or east its south
+    // bank; west and east banks are those transposed, so the painted light stays top-left.
+    const texture = bank.side === "n" || bank.side === "w" ? bankFrames!.north : bankFrames!.south;
+    const sprite = new Sprite(texture);
+    const scale = size / texture.width;
+    const far = bank.side === "s" || bank.side === "e" ? 1 - BANK_DEPTH : 0;
+    if (bank.side === "n" || bank.side === "s") {
+      sprite.position.set(bank.x * size, (bank.y + far) * size);
+      sprite.scale.set(scale);
+    } else {
+      sprite.position.set((bank.x + far) * size, bank.y * size);
+      transpose(sprite, scale);
+    }
+    layer.addChild(sprite);
+  }
+  for (const feature of plan.features) layer.addChild(tileSprite(featureTextures[feature.kind], feature.x, feature.y, size));
+
+  for (const deck of plan.decks) {
+    const texture = deckFrames[DECK_FRAMES.indexOf(deck.frame)];
+    const sprite = new Sprite(texture);
+    sprite.anchor.set(0.5);
+    sprite.position.set((deck.x + 0.5) * size, (deck.y + 0.5) * size);
+    const scale = size / texture.width;
+    if (deck.vertical) {
+      transpose(sprite, scale);
+    } else {
+      sprite.scale.set(scale);
+    }
+    layer.addChild(sprite);
+  }
+  return layer;
+}
+
+/**
+ * Mirrors a sprite across its top-left to bottom-right diagonal (a quarter turn and a flip)
+ * instead of turning it, so art lit from the top left is still lit from the top left.
+ */
+function transpose(sprite: Sprite, scale: number) {
+  sprite.rotation = Math.PI / 2;
+  sprite.scale.set(scale, -scale);
+}
+
+/** A rectangle over the whole board filled with a repeating texture, `tiles` board tiles per copy. */
+function fill(texture: Texture, tiles: number, cols: number, rows: number, size: number, offset = 0): Graphics {
+  const scale = (size * tiles) / texture.width;
+  const graphics = new Graphics();
+  graphics.beginTextureFill({ texture, matrix: new Matrix(scale, 0, 0, scale, offset * size, offset * size) });
+  graphics.drawRect(0, 0, cols * size, rows * size);
+  graphics.endFill();
+  return graphics;
+}
+
+function tileSprite(texture: Texture, x: number, y: number, size: number): Sprite {
+  const sprite = new Sprite(texture);
+  sprite.position.set(x * size, y * size);
+  sprite.width = size;
+  sprite.height = size;
+  return sprite;
+}
 
 export function drawHighlight(root: Container, cell: ProjectedCell, fill: number, fillAlpha: number, stroke: number, strokeAlpha: number) {
   const highlight = new Graphics();
@@ -65,71 +177,8 @@ export function drawHighlight(root: Container, cell: ProjectedCell, fill: number
   root.addChild(highlight);
 }
 
-export function drawTerrain(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
-  const palette = terrainPalette(tile.terrain);
-  const shadow = new Graphics();
-  shadow.beginFill(palette.shadow, 0.28);
-  shadow.drawRoundedRect(x, y + size * 0.03, size, size, 16);
-  shadow.endFill();
-  root.addChild(shadow);
-
-  if (tile.terrain === "road") {
-    drawRoadTile(root, state, tile, x, y, size);
-    if (tile.structure) drawOwnershipMarker(root, tile, x, y, size);
-    return;
-  }
-
-  if (tile.terrain === "river") {
-    drawRiverTile(root, state, tile, x, y, size);
-    if (tile.structure) drawOwnershipMarker(root, tile, x, y, size);
-    return;
-  }
-
-  if (REGION_TERRAIN.includes(tile.terrain)) {
-    // Swamps and lakes are drawn over this grass as whole regions (drawTerrainRegions).
-    drawPlainsTile(root, tile, x, y, size);
-    return;
-  }
-
-  const config = resolveTerrainSprite(state, tile);
-  if (config) {
-    drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation, config.tint);
-    if (tile.structure) drawOwnershipMarker(root, tile, x, y, size);
-    return;
-  }
-
-  const fallback = new Graphics();
-  fallback.beginFill(palette.base, 0.94);
-  fallback.drawRoundedRect(x, y, size, size, 16);
-  fallback.endFill();
-  root.addChild(fallback);
-
-  if (tile.structure) drawOwnershipMarker(root, tile, x, y, size);
-}
-
-function drawBaseTerrainSprite(root: Container, texture: Texture, x: number, y: number, size: number, rotation = 0, tint = 0xffffff) {
-  const sprite = new Sprite(texture);
-  if (rotation !== 0) {
-    sprite.anchor.set(0.5);
-    sprite.x = x + size * 0.5;
-    sprite.y = y + size * 0.5;
-  } else {
-    sprite.x = x;
-    sprite.y = y;
-  }
-  sprite.width = size;
-  sprite.height = size;
-  sprite.rotation = rotation;
-  sprite.tint = tint;
-  sprite.roundPixels = true;
-  root.addChild(sprite);
-}
-
-function drawPlainsTile(root: Container, tile: TileState, x: number, y: number, size: number) {
-  drawBaseTerrainSprite(root, selectPlainsTexture(tile), x, y, size, terrainRotation(tile), terrainTint(tile));
-}
-
-function drawOwnershipMarker(root: Container, tile: TileState, x: number, y: number, size: number) {
+/** The flag on a village or keep in its owner's colour; drawn with each redraw, as owners change. */
+export function drawOwnershipMarker(root: Container, tile: TileState, x: number, y: number, size: number) {
   const ownerColor = tile.owner ? PLAYER_COLORS[tile.owner] : 0xa0a9ab;
   const marker = new Graphics();
   const poleX = x + size * 0.16;
@@ -157,155 +206,4 @@ function drawOwnershipMarker(root: Container, tile: TileState, x: number, y: num
   base.endFill();
   root.addChild(base);
   root.addChild(marker);
-}
-
-function drawRoadTile(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
-  const dirs = neighborDirections(state, tile, ["road", "bridge", "village", "keep"]);
-  const activeDirs: Array<"n" | "s" | "e" | "w"> = dirs.length > 0 ? dirs : ["e", "w"];
-  const config = resolveRoadSprite(activeDirs);
-  drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation);
-}
-
-function drawRiverTile(root: Container, state: MatchState, tile: TileState, x: number, y: number, size: number) {
-  const config = resolveRiverSprite(state, tile);
-  drawBaseTerrainSprite(root, config.texture, x, y, size, config.rotation);
-}
-
-function resolveRoadSprite(dirs: Array<"n" | "s" | "e" | "w">): { texture: Texture; rotation?: number } {
-  const hasN = dirs.includes("n");
-  const hasS = dirs.includes("s");
-  const hasE = dirs.includes("e");
-  const hasW = dirs.includes("w");
-
-  if (dirs.length >= 4) return { texture: roadTextures.cross };
-  if (dirs.length === 3) {
-    if (!hasN) return { texture: roadTextures.t };
-    if (!hasE) return { texture: roadTextures.tLeft };
-    // The dedicated north-facing T has washed-out grass that shows as a pale square; turn the south-facing one instead.
-    if (!hasS) return { texture: roadTextures.t, rotation: Math.PI };
-    return { texture: roadTextures.tRight };
-  }
-  if (dirs.length === 2) {
-    if (hasN && hasS) return { texture: roadTextures.vertical };
-    if (hasE && hasW) return { texture: roadTextures.horizontal };
-    if (hasE && hasS) return { texture: roadTextures.corner, rotation: 0 };
-    if (hasS && hasW) return { texture: roadTextures.corner, rotation: Math.PI / 2 };
-    if (hasN && hasW) return { texture: roadTextures.corner, rotation: Math.PI };
-    return { texture: roadTextures.corner, rotation: -Math.PI / 2 };
-  }
-  if (hasN || hasS) return { texture: roadTextures.vertical };
-  return { texture: roadTextures.horizontal };
-}
-
-function riverLikeAt(state: MatchState, x: number, y: number): boolean {
-  const next = state.board[y]?.[x];
-  return !!next && (next.terrain === "river" || next.terrain === "bridge");
-}
-
-function resolveRiverSprite(state: MatchState, tile: TileState): { texture: Texture; rotation?: number } {
-  const dirs = neighborDirections(state, tile, ["river", "bridge"]);
-  const hasN = dirs.includes("n");
-  const hasS = dirs.includes("s");
-  const hasE = dirs.includes("e");
-  const hasW = dirs.includes("w");
-  const { x, y } = tile;
-
-  if (hasE && !riverLikeAt(state, x + 2, y) && ((hasN && riverLikeAt(state, x + 1, y - 1)) || (hasS && riverLikeAt(state, x + 1, y + 1)))) {
-    return { texture: riverTextures.edge };
-  }
-  if (hasW && !riverLikeAt(state, x - 2, y) && ((hasN && riverLikeAt(state, x - 1, y - 1)) || (hasS && riverLikeAt(state, x - 1, y + 1)))) {
-    return { texture: riverTextures.edge, rotation: Math.PI };
-  }
-  if (hasS && !riverLikeAt(state, x, y + 2) && ((hasE && riverLikeAt(state, x + 1, y + 1)) || (hasW && riverLikeAt(state, x - 1, y + 1)))) {
-    return { texture: riverTextures.edge, rotation: Math.PI / 2 };
-  }
-  if (hasN && !riverLikeAt(state, x, y - 2) && ((hasE && riverLikeAt(state, x + 1, y - 1)) || (hasW && riverLikeAt(state, x - 1, y - 1)))) {
-    return { texture: riverTextures.edge, rotation: -Math.PI / 2 };
-  }
-
-  if (dirs.length >= 4) return { texture: riverTextures.cross };
-  if (dirs.length === 3) {
-    if (!hasN) return { texture: riverTextures.t, rotation: 0 };
-    if (!hasE) return { texture: riverTextures.t, rotation: Math.PI / 2 };
-    if (!hasS) return { texture: riverTextures.t, rotation: Math.PI };
-    return { texture: riverTextures.t, rotation: -Math.PI / 2 };
-  }
-  if (dirs.length === 2) {
-    if (hasN && hasS) return { texture: riverTextures.horizontal, rotation: Math.PI / 2 };
-    if (hasE && hasW) return { texture: riverTextures.horizontal };
-    if (hasE && hasS) return { texture: riverTextures.corner, rotation: 0 };
-    if (hasS && hasW) return { texture: riverTextures.corner, rotation: Math.PI / 2 };
-    if (hasN && hasW) return { texture: riverTextures.corner, rotation: Math.PI };
-    return { texture: riverTextures.corner, rotation: -Math.PI / 2 };
-  }
-  if (hasN || hasS) return { texture: riverTextures.horizontal, rotation: Math.PI / 2 };
-  return { texture: riverTextures.horizontal };
-}
-
-function resolveTerrainSprite(state: MatchState, tile: TileState): { texture: Texture; rotation?: number; tint?: number } | null {
-  switch (tile.terrain) {
-    case "plains": return { texture: selectPlainsTexture(tile), rotation: terrainRotation(tile), tint: terrainTint(tile) };
-    case "forest": return { texture: terrainTextures.forest };
-    case "hill": return { texture: terrainTextures.hill };
-    case "village": return { texture: terrainTextures.village };
-    case "keep": return { texture: terrainTextures.keep };
-    case "bridge": {
-      const span = neighborDirections(state, tile, ["bridge"]);
-      if (span.includes("e")) return { texture: terrainTextures.bridgeWide };
-      if (span.includes("w")) return { texture: terrainTextures.bridgeWide, rotation: Math.PI };
-      if (span.includes("s")) return { texture: terrainTextures.bridgeWide, rotation: Math.PI / 2 };
-      if (span.includes("n")) return { texture: terrainTextures.bridgeWide, rotation: -Math.PI / 2 };
-      return { texture: terrainTextures.bridge, rotation: shouldRotateBridge(state, tile) ? Math.PI / 2 : 0 };
-    }
-    default: return null;
-  }
-}
-
-function selectPlainsTexture(tile: TileState): Texture {
-  const hash = ((tile.x * 73856093) ^ (tile.y * 19349663)) >>> 0;
-  const variant = hash % 8;
-  if (variant === 0) return terrainTextures.plains2;
-  if (variant === 5) return terrainTextures.plains3;
-  return terrainTextures.plains;
-}
-
-function shouldRotateBridge(state: MatchState, tile: TileState): boolean {
-  const riverDirs = neighborDirections(state, tile, ["river"]);
-  return riverDirs.includes("n") || riverDirs.includes("s");
-}
-
-function terrainTint(tile: TileState): number {
-  const variance = ((tile.x * 31 + tile.y * 17) % 5) - 2;
-  const value = clamp(255 + variance * 5, 236, 255);
-  return (value << 16) | (value << 8) | value;
-}
-
-function terrainRotation(_tile: TileState): number {
-  return 0;
-}
-
-function neighborDirections(state: MatchState, tile: TileState, kinds: TerrainKind[]): Array<"n" | "s" | "e" | "w"> {
-  const directions: Array<"n" | "s" | "e" | "w"> = [];
-  const checks: Array<["n" | "s" | "e" | "w", number, number]> = [["n", 0, -1], ["s", 0, 1], ["w", -1, 0], ["e", 1, 0]];
-  for (const [dir, dx, dy] of checks) {
-    const next = state.board[tile.y + dy]?.[tile.x + dx];
-    if (next && kinds.includes(next.terrain)) directions.push(dir);
-  }
-  return directions;
-}
-
-function terrainPalette(terrain: TerrainKind) {
-  switch (terrain) {
-    case "plains": return { base: 0xa7b66a, shadow: 0x728c43 };
-    case "forest": return { base: 0x6a8d4d, shadow: 0x3b5630 };
-    case "hill": return { base: 0xb9af7b, shadow: 0x8c7f53 };
-    case "road": return { base: 0xb7976a, shadow: 0x7a5e44 };
-    case "swamp": return { base: 0x5b7353, shadow: 0x314634 };
-    case "river": return { base: 0x567ea2, shadow: 0x2b4a64 };
-    case "water": return { base: 0x315f78, shadow: 0x173344 };
-    case "shore": return { base: 0x6f8651, shadow: 0x344627 };
-    case "bridge": return { base: 0x7d6040, shadow: 0x4c311f };
-    case "village": return { base: 0xb3b98b, shadow: 0x736a48 };
-    case "keep": return { base: 0x8f9ca3, shadow: 0x5b6672 };
-  }
 }

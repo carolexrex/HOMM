@@ -3,36 +3,43 @@ import type { MatchState, TerrainKind } from "../../engine";
 import swampUrl from "../../assets/terrain_swamp.jpg";
 import lakeWaterUrl from "../../assets/terrain/lake_water.jpg";
 import shoreBankUrl from "../../assets/terrain/shore_bank.jpg";
+import riverWaterUrl from "../../assets/terrain/board/river_water.jpg";
 import { regionTileOutline, type RegionEdge, type RegionTest } from "./regionShapes";
 
 /**
- * Swamps and lakes are drawn as continuous regions over the grass that drawTerrain lays under
- * them: one texture runs across the whole region in board coordinates (no per-tile repeats or
- * seams between neighbouring tiles), and only the edges that face land are inset, softened,
- * and rounded. See regionShapes.ts for the outlines.
+ * Swamps, lakes, and rivers are drawn as continuous regions over the board's grass
+ * (terrainLayer.ts): one texture runs across the whole region in board coordinates (no per-tile
+ * repeats or seams between neighbouring tiles), and only the edges that face land are inset,
+ * softened, and rounded. See regionShapes.ts for the outlines.
  */
 
 const regionTextures = {
   swamp: Texture.from(swampUrl),
   lake: Texture.from(lakeWaterUrl),
-  bank: Texture.from(shoreBankUrl)
+  bank: Texture.from(shoreBankUrl),
+  river: Texture.from(riverWaterUrl)
 };
 
 /**
  * Resolves once the region textures have loaded. Texture fills compute their coordinates from
  * the texture size when drawn, so regions are drawn only after this (sprites update themselves).
  */
-export const regionTexturesReady: Promise<void> = Promise.all(
-  Object.values(regionTextures).map(
-    (texture) =>
-      new Promise<void>((resolve) => {
-        const base = texture.baseTexture;
-        if (base.valid) return resolve();
-        base.once("loaded", () => resolve());
-        base.once("error", () => resolve());
-      })
-  )
-).then(() => undefined);
+export const regionTexturesReady: Promise<void> = texturesReady(Object.values(regionTextures));
+
+/** Resolves once every texture has loaded (or failed to). */
+export function texturesReady(textures: Texture[]): Promise<void> {
+  return Promise.all(
+    textures.map(
+      (texture) =>
+        new Promise<void>((resolve) => {
+          const base = texture.baseTexture;
+          if (base.valid) return resolve();
+          base.once("loaded", () => resolve());
+          base.once("error", () => resolve());
+        })
+    )
+  ).then(() => undefined);
+}
 
 interface RegionLayer extends RegionEdge {
   texture: Texture;
@@ -43,6 +50,14 @@ interface RegionLayer extends RegionEdge {
   /** Shifts the texture, in tiles, so stacked layers of one texture do not line up. */
   offset?: number;
 }
+
+// The river's water, across both tiles of the channel and under its bridges: bluer and streaked
+// with current, unlike the lake's still, grey-green water. Its banks are painted strips laid over
+// the water's edge (terrainRenderer.ts), and it carries on past the board's edge.
+const RIVER_LAYERS: RegionLayer[] = [
+  { texture: regionTextures.river, tilesPerTexture: 2, alpha: 0.7, inset: 0.1, wobble: 0.02, cornerRadius: 0.24 },
+  { texture: regionTextures.river, tilesPerTexture: 2, alpha: 1, inset: 0.13, wobble: 0.02, cornerRadius: 0.2 }
+];
 
 // Three nested passes fade the bog into the grass over the outer fifth of a land-facing side.
 const SWAMP_LAYERS: RegionLayer[] = [
@@ -61,25 +76,32 @@ const LAKE_LAYERS: RegionLayer[] = [
   { texture: regionTextures.lake, tilesPerTexture: 3.3, alpha: 0.38, inset: 0.13, wobble: 0.025, cornerRadius: 0.32, offset: 0.61 }
 ];
 
-const REGIONS: Array<{ kinds: TerrainKind[]; layers: RegionLayer[] }> = [
+/** `offBoard`: the region carries on past the board's edge (no bank there). */
+const REGIONS: Array<{ kinds: TerrainKind[]; layers: RegionLayer[]; offBoard?: boolean }> = [
   { kinds: ["swamp"], layers: SWAMP_LAYERS },
-  { kinds: ["water", "shore"], layers: LAKE_LAYERS }
+  { kinds: ["water", "shore"], layers: LAKE_LAYERS },
+  { kinds: ["river", "bridge"], layers: RIVER_LAYERS, offBoard: true }
 ];
 
-/** Terrain kinds drawn as regions; drawTerrain gives their tiles a grass base. */
-export const REGION_TERRAIN: TerrainKind[] = REGIONS.flatMap((region) => region.kinds);
-
 /**
- * Builds every swamp and lake on the board, in board coordinates: tile 0,0 at the origin and
- * `size` pixels per tile. The layer depends only on the map, so the canvas keeps it and moves and
- * scales it with the view.
+ * Builds every swamp, lake, and river on the board, in board coordinates: tile 0,0 at the origin
+ * and `size` pixels per tile. It is part of the static terrain layer (terrainLayer.ts).
  */
 export function buildTerrainRegions(state: MatchState, size: number): Container {
   const regions = new Container();
-  for (const { kinds, layers } of REGIONS) {
+  const rows = state.board.length;
+  const cols = state.board[0].length;
+  for (const { kinds, layers, offBoard } of REGIONS) {
     const tiles = state.board.flat().filter((tile) => kinds.includes(tile.terrain));
     if (!tiles.length) continue;
-    const inRegion: RegionTest = (x, y) => kinds.includes(state.board[y]?.[x]?.terrain as TerrainKind);
+    const inRegion: RegionTest = (x, y) => {
+      const inside = x >= 0 && y >= 0 && x < cols && y < rows;
+      if (!inside && !offBoard) return false;
+      // Past the edge, a region that runs off the board continues as the nearest tile on it.
+      const clampedX = Math.min(cols - 1, Math.max(0, x));
+      const clampedY = Math.min(rows - 1, Math.max(0, y));
+      return kinds.includes(state.board[clampedY][clampedX].terrain);
+    };
     const graphics = new Graphics();
     for (const layer of layers) {
       const texture = layer.texture;

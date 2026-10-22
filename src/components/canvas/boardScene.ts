@@ -18,14 +18,14 @@ function* labelsIn(set: LabelSet) {
  *
  * - Text labels, matched by style and text, so an unchanged HP number or popup is neither
  *   drawn nor uploaded again.
- * - The swamp and lake layer, which depends only on the map and is moved and scaled with the
- *   view rather than rebuilt.
+ * - The terrain layer (grass, roads, regions, features, and bridges; see terrainRenderer.ts),
+ *   which depends only on the map and is moved and scaled with the view rather than rebuilt.
  */
 export class BoardScene {
   private root: Container | null = null;
   private kept: LabelSet = new Map();
   private taken: LabelSet = new Map();
-  private regions: { key: string; layer: Container } | null = null;
+  private terrain: { key: string; layer: Container } | null = null;
   private destroyed = false;
 
   constructor(private readonly stage: Container) {}
@@ -37,7 +37,7 @@ export class BoardScene {
     this.kept = this.taken;
     this.taken = new Map();
     for (const label of labelsIn(this.kept)) label.removeFromParent();
-    this.regions?.layer.removeFromParent();
+    this.terrain?.layer.removeFromParent();
     if (this.root) {
       this.root.destroy({ children: true });
       this.root = null;
@@ -70,13 +70,13 @@ export class BoardScene {
     return label;
   };
 
-  /** The swamp and lake layer for `key` (the map it was built for), built once. */
-  regionLayer(key: string, build: () => Container): Container {
-    if (this.regions?.key !== key) {
-      this.regions?.layer.destroy({ children: true });
-      this.regions = { key, layer: build() };
+  /** The terrain layer for `key` (the map it was built for), built once. */
+  terrainLayer(key: string, build: () => Container): Container {
+    if (this.terrain?.key !== key) {
+      this.terrain?.layer.destroy({ children: true });
+      this.terrain = { key, layer: build() };
     }
-    return this.regions.layer;
+    return this.terrain.layer;
   }
 
   /** Ends a redraw: destroys the kept labels it did not take. */
@@ -90,12 +90,12 @@ export class BoardScene {
     if (this.destroyed) return;
     this.destroyed = true;
     const owned: DisplayObject[] = [...labelsIn(this.kept), ...labelsIn(this.taken)];
-    if (this.regions) owned.push(this.regions.layer);
+    if (this.terrain) owned.push(this.terrain.layer);
     if (this.root) owned.push(this.root);
     for (const object of owned) if (!object.destroyed) object.destroy({ children: true });
     this.kept = new Map();
     this.taken = new Map();
-    this.regions = null;
+    this.terrain = null;
     this.root = null;
   }
 }

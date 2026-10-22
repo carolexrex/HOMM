@@ -12,7 +12,7 @@ async function startHotseat(page: Page, mapName: string) {
   await page.getByRole("button", { name: /Hot-seat/ }).first().click();
   await page.locator(".launch-map-list").getByRole("button", { name: new RegExp(`^${mapName}`) }).click();
   await page.getByRole("button", { name: "Start Hot-seat Match" }).click();
-  // The swamp and lake textures have loaded and the board is drawn with them.
+  // The terrain textures have loaded and the board is drawn with them.
   await expect(page.locator(".canvas-wrap")).toHaveAttribute("data-regions", "ready");
   await expect(turnChip(page)).toContainText(`${PLAYER_NAMES.sun} to act`);
 }
